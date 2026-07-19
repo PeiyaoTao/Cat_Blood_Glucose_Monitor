@@ -43,6 +43,14 @@
 			}
 		},
 		{
+			"path": "pages/history/index",
+			"style": {
+				"navigationBarTitleText": "历史数据",
+				"navigationBarBackgroundColor": "#F7F9FC",
+				"enablePullDownRefresh": false
+			}
+		},
+		{
 			"path": "pages/tools/index",
 			"style": {
 				"navigationBarTitleText": "工具",
