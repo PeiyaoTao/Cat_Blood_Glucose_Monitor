@@ -81,7 +81,9 @@ const recentRecords = ref([
 ])
 
 const handleLogGlucose = () => {
-  uni.showToast({ title: '准备开发: 录入血糖', icon: 'none' })
+  uni.navigateTo({
+    url: '/pages/log/index'
+  })
 }
 
 const handleLogInsulin = () => {

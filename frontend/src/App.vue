@@ -2,6 +2,13 @@
 import { onLaunch, onShow, onHide } from "@dcloudio/uni-app";
 onLaunch(() => {
   console.log("App Launch");
+  // 初始化微信云开发
+  // @ts-ignore
+  if (typeof wx !== 'undefined' && wx.cloud) {
+    // @ts-ignore
+    wx.cloud.init({ traceUser: true });
+    console.log("微信云开发已初始化");
+  }
 });
 onShow(() => {
   console.log("App Show");
