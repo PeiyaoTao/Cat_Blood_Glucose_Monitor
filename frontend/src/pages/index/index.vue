@@ -71,13 +71,14 @@
 import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 
-// 模拟猫咪数据 (后期再打通猫咪档案表)
+// 猫咪预设标准 (根据 CVMA 195-2024)
 const catInfo = ref({
   name: '小煤球',
   age: 6,
   daysSinceDiagnosis: 142,
-  targetMin: 5.0,
-  targetMax: 15.0
+  // 警戒阈值
+  thresholdNormalMax: 7.0, // <= 7.0 为正常空腹/随机血糖上限
+  thresholdDangerMin: 15.0 // >= 15.0 属于极高危(诊断标准 5.1.2 d)
 })
 
 const recentRecords = ref<any[]>([])
@@ -142,9 +143,18 @@ const goToHistory = () => {
 }
 
 const getGlucoseClass = (val: number) => {
-  if (val < catInfo.value.targetMin) return 'text-warning'
-  if (val > catInfo.value.targetMax) return 'text-danger'
-  return 'text-safe'
+  // 根据 T/CVMA 195—2024 标准：
+  // 正常猫咪血糖应 <= 7.0 mmol/L
+  // > 7.0 且 < 15.0 属于临界升高 (5.1.2 e)
+  // >= 15.0 属于高血糖确诊指标 (5.1.2 d)
+  if (val >= catInfo.value.thresholdDangerMin) {
+    return 'text-danger' // 红色：>= 15.0 高危
+  } else if (val > catInfo.value.thresholdNormalMax) {
+    return 'text-warning' // 橙色：7.0 < val < 15.0 偏高
+  } else if (val < 4.0) {
+    return 'text-danger' // 红色：低血糖高危 (临床通用底线)
+  }
+  return 'text-safe' // 绿色：正常 (4.0 ~ 7.0)
 }
 </script>
 
