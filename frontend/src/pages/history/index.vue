@@ -35,7 +35,7 @@
             </view>
             <view class="action-wrap">
               <view class="delete-btn" @click.stop="onLongPress(item._id)">
-                <text class="icon-trash">🗑️</text> 删除
+                <view class="icon-trash"></view> <text>删除</text>
               </view>
             </view>
           </view>
@@ -301,8 +301,12 @@ const getBgColorClass = (value: number) => {
   border-radius: 8rpx;
 }
 .icon-trash {
-  margin-right: 4rpx;
-  font-size: 24rpx;
+  width: 24rpx;
+  height: 24rpx;
+  margin-right: 8rpx;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23E74C3C' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 6h18'/%3E%3Cpath d='M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6'/%3E%3Cpath d='M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2'/%3E%3C/svg%3E");
+  background-size: contain;
+  background-repeat: no-repeat;
 }
 .value-text {
   font-size: 48rpx;
