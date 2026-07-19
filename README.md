@@ -1,37 +1,60 @@
-# 微信小程序示例
-微信小程序示例源码，欢迎扫描以下小程序码体验。
+# 🐾 猫咪控糖日记 (Cat Diabetes Tracker)
 
-> 提示：请使用微信开发者工具或微信客户端 6.7.2 及以上版本运行。
+「猫咪控糖日记」是一款专为糖尿病患猫（糖猫）家庭打造的微信小程序。它致力于帮助宠物主人科学、系统地记录和追踪猫咪的血糖及打针数据，辅助日常病情管理。
 
-<img width="200" src="https://res.wx.qq.com/op_res/QqOF7ydl0dkpq-orpebXL-gBspr08VjoFOFGrWvKF9IULLhfT9XhnsSKlvc0gI8d">
+## ✨ 核心功能
 
-## 使用
+- 🐈 **多猫档案管理**：支持记录多只猫咪的基础信息、确诊时间及个性化的血糖控制目标（目标范围及高低危险阈值警告）。
+- 🩸 **血糖与打针双记录**：直观、快捷地记录每日的血糖数值（支持空腹、餐后等多种状态）和胰岛素注射剂量。
+- 📈 **数据可视化与历史回溯**：通过折线图直观展示近期血糖趋势，内置丝滑的“历史记录”长列表功能，随时回溯和整理错误数据。
+- 🔔 **定制化微信定时提醒**：内置云端下发任务功能，可设定精确到分钟的“测血糖”或“打针”提醒，通过微信服务通知触达用户。
+- 🛠️ **实用医学小工具**：
+  - **单位换算器**：一键进行 `mg/dL` 和 `mmol/L` 的互换。
+  - **碳水干物质计算器**：方便主人在购买猫粮/主食罐时计算实际碳水含量，挑选最适合糖猫的食物。
 
-```
-cd demo
-npm i
-cd miniprogram
-npm i
-```
-完成上述步骤后，使用微信开发者工具，点击【工具-构建npm】
+## 🛠️ 技术栈
 
-使用[微信开发者工具](https://developers.weixin.qq.com/miniprogram/dev/devtools/download.html)打开该示例代码，云开发环境搭建请参考[云开发示例说明](https://github.com/wechat-miniprogram/miniprogram-demo/blob/master/miniprogram/page/cloud/README.md)。
+- **前端框架**：[Uni-app](https://uniapp.dcloud.net.cn/) + Vue 3 + Vite
+- **UI & 样式**：纯原生 CSS 精心打磨（零外部组件库依赖，包含丰富的 CSS SVG 矢量图标，保持极小包体积）
+- **图表渲染**：[uCharts](https://www.ucharts.cn/) (通过 uni-modules 引入)
+- **后端服务**：微信小程序·云开发（Serverless）
+  - 云数据库 (Cloud Database)：存储猫咪档案、血糖及打针流水
+  - 云函数 (Cloud Functions)：提供定时提醒逻辑及消息下发能力
 
+## 🚀 部署与运行指南
 
-## 贡献
+### 1. 环境准备
+- 安装 [Node.js](https://nodejs.org/) (推荐 v16+ 或 v18+)
+- 安装 [微信开发者工具](https://developers.weixin.qq.com/miniprogram/dev/devtools/download.html)
 
-如果你有 bug 反馈或其他任何建议，欢迎提 issue 给我们。
+### 2. 依赖安装与启动
+在项目根目录（或 `frontend` 目录）下打开终端，依次执行：
 
-如果你愿意一起来完善小程序示例，欢迎通过 PR 的方式贡献代码。为了保证代码风格的统一，在编写代码之前，请在项目根目录运行以下命令安装依赖：
-
-```
+```bash
+# 安装依赖
 npm install
-```
-同时，确保你的代码可以通过 Lint 检查：
-```
-npm run lint
+
+# 启动微信小程序开发服务
+npm run dev:mp-weixin
 ```
 
-## 截图
+### 3. 在微信开发者工具中预览
+1. 打开微信开发者工具，选择 **“导入项目”**。
+2. 目录选择项目中的 `frontend/dist/dev/mp-weixin` 文件夹。
+3. 输入你自己的小程序 `AppID`。
+4. 点击“云开发”开通云环境，将 `cloudfunctions` 文件夹下的云函数（`login`、`setReminder`、`sendReminders`）分别右键点击 **“上传并部署：云端安装依赖”**。
 
-<img width="375" src="https://res.wx.qq.com/op_res/0_vsSii5DaG-1hoXcqmBCT_tPShgSPKi3_FBVuVj1tu1ZdZD8lwYNrSQm3mdswI2">
+### 4. 发布正式版
+运行以下命令构建经过压缩优化的正式版代码：
+```bash
+npm run build:mp-weixin
+```
+然后将 `frontend/dist/build/mp-weixin` 导入微信开发者工具进行上传并提交审核。
+
+## ⚠️ 免责声明
+
+本程序提供的目标血糖范围及预警逻辑参考自《犬猫糖尿病的筛查和诊断》(T/CVMA 195-2024)。
+本程序仅作为日常数据辅助追踪工具，**绝不构成任何专业的医疗诊断。任何胰岛素剂量的调整及病情判定，请务必遵从您的主治执业兽医的医嘱！**
+
+---
+*Built with ❤️ for every sweet diabetic kitty.*
