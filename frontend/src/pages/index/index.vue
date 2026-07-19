@@ -61,7 +61,7 @@
 
     <!-- 免责声明与引用 -->
     <view class="disclaimer">
-      <text class="disclaimer-text">* 默认目标血糖范围 (5.0~15.0 mmol/L) 建议参考自 AAHA (美国动物医院协会) 犬猫糖尿病管理指南。</text>
+      <text class="disclaimer-text">* 默认目标血糖范围 (5.0~15.0 mmol/L) 建议参考自《中国小动物临床内分泌疾病诊疗共识》及主流兽医猫内科指南。</text>
       <text class="disclaimer-text bold">⚠️ 免责声明：本程序仅供数据追踪与辅助记录，不构成医疗诊断建议。任何胰岛素剂量的调整，请务必遵从主治兽医的医嘱。</text>
     </view>
   </view>
