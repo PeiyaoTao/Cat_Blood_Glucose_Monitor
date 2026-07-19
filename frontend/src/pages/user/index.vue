@@ -18,22 +18,22 @@
       <view class="menu-item" @click="handleMenuClick('猫咪档案')">
         <text class="menu-icon">🐈</text>
         <text class="menu-text">管理猫咪档案</text>
-        <text class="arrow">></text>
+        <text class="arrow">›</text>
       </view>
       <view class="menu-item" @click="handleMenuClick('家庭共享')">
         <text class="menu-icon">👨‍👩‍👧</text>
         <text class="menu-text">家庭成员共享</text>
-        <text class="arrow">></text>
+        <text class="arrow">›</text>
       </view>
       <view class="menu-item" @click="handleMenuClick('使用帮助')">
         <text class="menu-icon">📖</text>
         <text class="menu-text">使用帮助与医学免责</text>
-        <text class="arrow">></text>
+        <text class="arrow">›</text>
       </view>
       <view class="menu-item" @click="handleMenuClick('关于我们')">
         <text class="menu-icon">ℹ️</text>
         <text class="menu-text">关于我们</text>
-        <text class="arrow">></text>
+        <text class="arrow">›</text>
       </view>
     </view>
   </view>

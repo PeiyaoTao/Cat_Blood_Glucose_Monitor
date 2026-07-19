@@ -48,7 +48,7 @@
     <view class="history-card card">
       <view class="card-header">
         <text class="title">近期血糖</text>
-        <text class="more" @click="goToHistory">全部 ></text>
+        <text class="more" @click="goToHistory">全部 ›</text>
       </view>
       
       <view class="record-list">
@@ -72,7 +72,7 @@
     <view class="history-card card">
       <view class="card-header">
         <text class="title">近期打针</text>
-        <text class="more" @click="goToHistory">全部 ></text>
+        <text class="more" @click="goToHistory">全部 ›</text>
       </view>
       
       <view class="record-list">
