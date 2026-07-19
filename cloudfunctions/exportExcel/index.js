@@ -86,28 +86,38 @@ exports.main = async (event, context) => {
     // 正序排序
     combined.sort((a, b) => a.timestamp - b.timestamp)
 
-    // 3. 构建 Excel 二维数组
-    let excelData = [
-      ['日期', '时间', '事件类型', '数值/剂量', '状态/部位', '备注信息']
-    ]
-
+    // 3. 构建三个 Sheet 的二维数组
+    let combinedSheet = [['日期', '时间', '事件类型', '数值/剂量', '状态/部位', '备注信息']]
     combined.forEach(item => {
-      excelData.push([
-        item.date,
-        item.time,
-        item.event,
-        item.value,
-        item.status,
-        item.note
-      ])
+      combinedSheet.push([item.date, item.time, item.event, item.value, item.status, item.note])
     })
+    if (combinedSheet.length === 1) combinedSheet.push(['暂无记录', '-', '-', '-', '-', '-'])
 
-    if (excelData.length === 1) {
-      excelData.push(['暂无记录', '-', '-', '-', '-', '-'])
-    }
+    let glucoseSheet = [['日期', '时间', '血糖值', '状态', '备注']]
+    glucoseRecords.sort((a,b) => new Date(a.createTime).getTime() - new Date(b.createTime).getTime())
+    glucoseRecords.forEach(item => {
+      const d = new Date(item.createTime)
+      const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+      glucoseSheet.push([dateStr, item.time, `${item.value} mmol/L`, item.status || '-', item.note || '-'])
+    })
+    if (glucoseSheet.length === 1) glucoseSheet.push(['暂无记录', '-', '-', '-', '-'])
 
-    // 4. 生成 Excel Buffer
-    var buffer = await xlsx.build([{ name: "控糖日记", data: excelData }])
+    let insulinSheet = [['日期', '时间', '胰岛素类型', '注射剂量', '注射部位', '食欲/备注']]
+    insulinRecords.sort((a,b) => new Date(a.createTime).getTime() - new Date(b.createTime).getTime())
+    insulinRecords.forEach(item => {
+      const d = new Date(item.createTime)
+      const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+      const tStr = item.inject_time || `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+      insulinSheet.push([dateStr, tStr, item.insulin_type || '胰岛素', `${item.dose} U`, item.site || '-', `食欲:${item.appetite||'-'} | ${item.note||'-'}`])
+    })
+    if (insulinSheet.length === 1) insulinSheet.push(['暂无记录', '-', '-', '-', '-', '-'])
+
+    // 4. 生成 Excel Buffer (多 Sheet)
+    var buffer = await xlsx.build([
+      { name: "合并总览", data: combinedSheet },
+      { name: "纯血糖", data: glucoseSheet },
+      { name: "纯打针", data: insulinSheet }
+    ])
 
     // 5. 上传到云存储
     const uploadRes = await cloud.uploadFile({
