@@ -63,8 +63,9 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 
-// 模拟猫咪数据
+// 模拟猫咪数据 (后期再打通猫咪档案表)
 const catInfo = ref({
   name: '小煤球',
   age: 6,
@@ -73,12 +74,52 @@ const catInfo = ref({
   targetMax: 15.0
 })
 
-// 模拟近期数据
-const recentRecords = ref([
-  { time: '08:00', status: '空腹', value: 8.5 },
-  { time: '昨天 20:00', status: '餐后2h', value: 16.2 },
-  { time: '昨天 08:00', status: '空腹', value: 4.8 },
-])
+const recentRecords = ref<any[]>([])
+
+const fetchRecentRecords = async () => {
+  // @ts-ignore
+  if (typeof wx === 'undefined' || !wx.cloud) return
+  
+  try {
+    // @ts-ignore
+    const db = wx.cloud.database()
+    const res = await db.collection('blood_glucose')
+      .orderBy('createTime', 'desc')
+      .limit(4)
+      .get()
+      
+    if (res.data) {
+      recentRecords.value = res.data.map((item: any) => ({
+        time: formatDisplayTime(item.createTime),
+        status: item.status,
+        value: item.bg_value
+      }))
+    }
+  } catch (err) {
+    console.error('获取最近记录失败', err)
+  }
+}
+
+const formatDisplayTime = (date: Date) => {
+  if (!date) return '未知时间'
+  const d = new Date(date)
+  const now = new Date()
+  
+  const isToday = d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+  
+  const pad = (n: number) => n.toString().padStart(2, '0')
+  const timeStr = `${pad(d.getHours())}:${pad(d.getMinutes())}`
+  
+  if (isToday) {
+    return `今天 ${timeStr}`
+  } else {
+    return `${d.getMonth() + 1}/${d.getDate()} ${timeStr}`
+  }
+}
+
+onShow(() => {
+  fetchRecentRecords()
+})
 
 const handleLogGlucose = () => {
   uni.navigateTo({

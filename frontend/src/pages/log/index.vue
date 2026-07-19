@@ -13,7 +13,7 @@
         <picker :range="statusOptions" @change="onStatusChange" :value="statusIndex">
           <view class="picker-view">
             {{ statusOptions[statusIndex] }}
-            <text class="icon-arrow">></text>
+            <text class="icon-arrow">▼</text>
           </view>
         </picker>
       </view>
@@ -23,7 +23,7 @@
         <picker mode="time" @change="onTimeChange" :value="formData.time">
           <view class="picker-view">
             {{ formData.time }}
-            <text class="icon-arrow">></text>
+            <text class="icon-arrow">▼</text>
           </view>
         </picker>
       </view>
@@ -68,8 +68,9 @@ const onTimeChange = (e: any) => {
 }
 
 const submitRecord = async () => {
-  if (!formData.value.bg_value) {
-    uni.showToast({ title: '请输入血糖数值', icon: 'none' })
+  const numValue = parseFloat(formData.value.bg_value)
+  if (!formData.value.bg_value || isNaN(numValue) || numValue <= 0 || numValue > 100) {
+    uni.showToast({ title: '请输入正确的血糖值 (0-100)', icon: 'none' })
     return
   }
   
@@ -81,7 +82,7 @@ const submitRecord = async () => {
       // @ts-ignore
       const db = wx.cloud.database()
       
-      await db.collection('glucose_records').add({
+      await db.collection('blood_glucose').add({
         data: {
           cat_id: 'default', // 之后有了真实的猫咪档案后再替换
           bg_value: parseFloat(formData.value.bg_value),
@@ -135,7 +136,8 @@ const submitRecord = async () => {
   font-size: 80rpx !important;
   font-weight: 800;
   text-align: center;
-  height: 100rpx;
+  height: 120rpx;
+  line-height: 120rpx;
 }
 .picker-view {
   background: #F7F9FC;
