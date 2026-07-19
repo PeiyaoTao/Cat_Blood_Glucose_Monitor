@@ -338,7 +338,7 @@ const handleLogInsulin = () => {
 }
 
 const goToHistory = () => {
-  uni.showToast({ title: '准备开发: 历史记录', icon: 'none' })
+  uni.navigateTo({ url: '/pages/history/index' })
 }
 
 const getGlucoseClass = (val: number) => {
