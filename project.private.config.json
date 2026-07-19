@@ -1,0 +1,22 @@
+{
+  "projectname": "%E7%8C%AB%E5%92%AA%E8%A1%80%E7%B3%96%E7%9B%91%E6%B5%8B",
+  "setting": {
+    "urlCheck": true,
+    "coverView": true,
+    "lazyloadPlaceholderEnable": false,
+    "skylineRenderEnable": false,
+    "preloadBackgroundData": false,
+    "autoAudits": false,
+    "useApiHook": true,
+    "showShadowRootInWxmlPanel": false,
+    "useStaticServer": true,
+    "useLanDebug": false,
+    "showES6CompileOption": false,
+    "compileHotReLoad": true,
+    "bigPackageSizeSupport": false,
+    "checkInvalidKey": true,
+    "useIsolateContext": false,
+    "ignoreDevUnusedFiles": true
+  },
+  "libVersion": "3.15.2"
+}
