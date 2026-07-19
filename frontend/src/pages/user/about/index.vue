@@ -1,7 +1,7 @@
 <template>
   <view class="container">
     <view class="logo-wrap">
-      <text class="logo">🐱</text>
+      <image src="/static/logo.png" class="logo-img" mode="aspectFit"></image>
       <text class="app-name">猫咪控糖日记</text>
       <text class="version">v1.0.0</text>
     </view>
@@ -29,7 +29,7 @@
 <style scoped>
 .container { padding: 32rpx; min-height: 100vh; background: var(--bg-color); }
 .logo-wrap { display: flex; flex-direction: column; align-items: center; margin: 60rpx 0; }
-.logo { font-size: 120rpx; margin-bottom: 16rpx; }
+.logo-img { width: 180rpx; height: 180rpx; margin-bottom: 24rpx; border-radius: 40rpx; box-shadow: 0 8rpx 32rpx rgba(0,0,0,0.05); }
 .app-name { font-size: 40rpx; font-weight: 800; color: var(--text-main); margin-bottom: 8rpx; }
 .version { font-size: 24rpx; color: var(--text-sub); }
 .card { background: #FFFFFF; border-radius: 24rpx; padding: 40rpx; margin-bottom: 32rpx; }
