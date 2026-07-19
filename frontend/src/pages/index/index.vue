@@ -44,12 +44,13 @@
       </view>
     </view>
 
-    <!-- 最近记录 -->
+    <!-- 血糖历史记录 -->
     <view class="history-card card">
       <view class="card-header">
-        <text class="card-title">最近记录</text>
+        <text class="title">近期血糖</text>
         <text class="more" @click="goToHistory">全部 ></text>
       </view>
+      
       <view class="record-list">
         <view class="record-item" v-for="(item, index) in recentRecords" :key="index">
           <view class="time-col">
@@ -60,6 +61,33 @@
             <text class="val" :class="getGlucoseClass(item.value)">{{ item.value }}</text>
             <text class="unit">mmol/L</text>
           </view>
+        </view>
+        <view v-if="recentRecords.length === 0" style="text-align: center; color: #ccc; padding: 20rpx 0;">
+          暂无记录，快去记录一下吧~
+        </view>
+      </view>
+    </view>
+
+    <!-- 打针历史记录 -->
+    <view class="history-card card">
+      <view class="card-header">
+        <text class="title">近期打针</text>
+        <text class="more" @click="goToHistory">全部 ></text>
+      </view>
+      
+      <view class="record-list">
+        <view class="record-item" v-for="(item, index) in recentInsulins" :key="index">
+          <view class="time-col">
+            <text class="time">{{ item.time }}</text>
+            <text class="status">{{ item.type }}</text>
+          </view>
+          <view class="value-col">
+            <text class="val" style="color: #3498DB;">{{ item.dose }}</text>
+            <text class="unit">U</text>
+          </view>
+        </view>
+        <view v-if="recentInsulins.length === 0" style="text-align: center; color: #ccc; padding: 20rpx 0;">
+          暂无打针记录
         </view>
       </view>
     </view>
@@ -90,6 +118,7 @@ const catInfo = ref({
 })
 
 const recentRecords = ref<any[]>([])
+const recentInsulins = ref<any[]>([])
 const chartData = ref({})
 const chartOpts = ref({
   color: ["#F39C12"],
@@ -157,6 +186,36 @@ const fetchRecentRecords = async () => {
   }
 }
 
+const fetchRecentInsulins = async () => {
+  // @ts-ignore
+  if (typeof wx === 'undefined' || !wx.cloud) return
+  try {
+    // @ts-ignore
+    const db = wx.cloud.database()
+    const res = await db.collection('insulin_records')
+      .orderBy('createTime', 'desc')
+      .limit(4)
+      .get()
+      
+    if (res.data) {
+      recentInsulins.value = res.data.map((item: any) => {
+        let displayTime = item.inject_time
+        if (item.createTime) {
+           const d = new Date(item.createTime)
+           displayTime = `${d.getMonth()+1}/${d.getDate()} ${item.inject_time || ''}`
+        }
+        return {
+          time: displayTime,
+          type: item.insulin_type || '胰岛素',
+          dose: item.dose
+        }
+      })
+    }
+  } catch (err) {
+    console.error('获取打针记录失败', err)
+  }
+}
+
 const formatDisplayTime = (date: Date) => {
   if (!date) return '未知时间'
   const d = new Date(date)
@@ -176,6 +235,7 @@ const formatDisplayTime = (date: Date) => {
 
 onShow(() => {
   fetchRecentRecords()
+  fetchRecentInsulins()
 })
 
 const handleLogGlucose = () => {
