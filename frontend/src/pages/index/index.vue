@@ -28,14 +28,17 @@
       </view>
     </view>
 
-    <!-- 血糖曲线图占位 -->
+    <!-- 图表展示 -->
     <view class="chart-card card">
       <view class="card-header">
-        <text class="card-title">近期血糖</text>
-        <text class="more">查看图表 ></text>
+        <text class="title">近期血糖曲线</text>
       </view>
       <view class="chart-placeholder">
-        <text class="chart-empty-text">📈 ECharts 曲线模块准备中</text>
+        <qiun-data-charts 
+          type="line"
+          :opts="chartOpts"
+          :chartData="chartData"
+        />
       </view>
     </view>
 
@@ -70,18 +73,51 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
+import qiunDataCharts from 'ch-ucharts/components/qiun-data-charts/qiun-data-charts.vue'
 
 // 猫咪预设标准 (根据 CVMA 195-2024)
 const catInfo = ref({
   name: '小煤球',
   age: 6,
   daysSinceDiagnosis: 142,
+  targetMin: 5.0,
+  targetMax: 15.0,
   // 警戒阈值
   thresholdNormalMax: 7.0, // <= 7.0 为正常空腹/随机血糖上限
   thresholdDangerMin: 15.0 // >= 15.0 属于极高危(诊断标准 5.1.2 d)
 })
 
 const recentRecords = ref<any[]>([])
+const chartData = ref({})
+const chartOpts = ref({
+  color: ["#F39C12"],
+  padding: [15, 10, 0, 15],
+  enableScroll: false,
+  legend: { show: false },
+  xAxis: {
+    disableGrid: true,
+  },
+  yAxis: {
+    gridType: "dash",
+    dashLength: 2,
+    data: [{ min: 0, max: 30 }]
+  },
+  extra: {
+    line: {
+      type: "curve",
+      width: 2,
+      activeType: "hollow"
+    },
+    markLine: {
+      type: 'solid',
+      dashLength: 4,
+      data: [
+        { value: catInfo.value.thresholdNormalMax, color: '#2ECC71' },
+        { value: catInfo.value.thresholdDangerMin, color: '#E74C3C' }
+      ]
+    }
+  }
+})
 
 const fetchRecentRecords = async () => {
   // @ts-ignore
@@ -92,15 +128,27 @@ const fetchRecentRecords = async () => {
     const db = wx.cloud.database()
     const res = await db.collection('blood_glucose')
       .orderBy('createTime', 'desc')
-      .limit(4)
+      .limit(15)
       .get()
       
     if (res.data) {
-      recentRecords.value = res.data.map((item: any) => ({
+      recentRecords.value = res.data.slice(0, 4).map((item: any) => ({
         time: formatDisplayTime(item.createTime),
         status: item.status,
         value: item.bg_value
       }))
+      
+      const chartItems = [...res.data].reverse()
+      const categories = chartItems.map(item => {
+        const d = new Date(item.createTime)
+        return `${d.getMonth()+1}/${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
+      })
+      const dataPoints = chartItems.map(item => item.bg_value)
+      
+      chartData.value = {
+        categories,
+        series: [{ name: "血糖值", data: dataPoints }]
+      }
     }
   } catch (err) {
     console.error('获取最近记录失败', err)
@@ -254,18 +302,8 @@ const getGlucoseClass = (val: number) => {
 
 /* 图表占位 */
 .chart-placeholder {
-  height: 360rpx;
-  background: #F8F9FA;
-  border-radius: 16rpx;
-  border: 2rpx dashed #E0E0E0;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
-.chart-empty-text {
-  color: #BDBDBD;
-  font-size: 28rpx;
-  font-weight: 600;
+  height: 450rpx;
+  width: 100%;
 }
 
 /* 列表样式 */
