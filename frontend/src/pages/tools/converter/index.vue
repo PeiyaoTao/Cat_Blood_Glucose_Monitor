@@ -23,7 +23,7 @@
 
       <!-- 转换图标 -->
       <view class="swap-icon">
-        <text>⇅</text>
+        <view class="icon-svg icon-swap"></view>
       </view>
 
       <!-- mg/dL 输入框 -->
@@ -43,7 +43,10 @@
     </view>
     
     <view class="info-card">
-      <text class="info-title">💡 换算公式</text>
+      <view style="display:flex; align-items:center; margin-bottom: 16rpx;">
+        <view class="icon-svg icon-idea"></view>
+        <text class="info-title" style="margin-bottom: 0;">换算公式</text>
+      </view>
       <text class="info-text">1 mmol/L = 18 mg/dL</text>
       <text class="info-text" style="margin-top: 12rpx;">例如：猫咪正常血糖范围一般为 4.0 ~ 7.0 mmol/L，换算后即为 72 ~ 126 mg/dL。</text>
     </view>
@@ -165,5 +168,19 @@ const onMgdlInput = (e: any) => {
   font-size: 26rpx;
   color: #34495E;
   line-height: 1.5;
+}
+.icon-svg {
+  display: inline-block;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+.icon-swap {
+  width: 48rpx; height: 48rpx;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23BDC3C7' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='16 3 21 8 16 13'/%3E%3Cline x1='21' y1='8' x2='9' y2='8'/%3E%3Cpolyline points='8 21 3 16 8 11'/%3E%3Cline x1='3' y1='16' x2='15' y2='16'/%3E%3C/svg%3E");
+}
+.icon-idea {
+  width: 32rpx; height: 32rpx; margin-right: 8rpx; vertical-align: middle;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F1C40F' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 18h6'/%3E%3Cpath d='M10 22h4'/%3E%3Cpath d='M12 2v1'/%3E%3Cpath d='M12 7v1'/%3E%3Cpath d='M5 10h1'/%3E%3Cpath d='M18 10h1'/%3E%3Cpath d='M6.34 3.34l.71.71'/%3E%3Cpath d='M16.95 4.05l.71-.71'/%3E%3Cpath d='M7 14A5 5 0 0 1 12 9a5 5 0 0 1 5 5v1a2 2 0 0 1-2 2h-6a2 2 0 0 1-2-2z'/%3E%3C/svg%3E");
 }
 </style>

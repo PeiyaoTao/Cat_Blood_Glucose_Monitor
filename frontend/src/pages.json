@@ -36,6 +36,13 @@
 			}
 		},
 		{
+			"path": "pages/tools/alarm/index",
+			"style": {
+				"navigationBarTitleText": "打针提醒",
+				"navigationBarBackgroundColor": "#F7F9FC"
+			}
+		},
+		{
 			"path": "pages/tools/index",
 			"style": {
 				"navigationBarTitleText": "工具",

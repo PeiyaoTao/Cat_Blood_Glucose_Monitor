@@ -54,6 +54,8 @@ const handleToolClick = (toolName: string) => {
         exportExcel(days)
       }
     })
+  } else if (toolName === '医疗提醒' || toolName === '打针提醒') {
+    uni.navigateTo({ url: '/pages/tools/alarm/index' })
   } else {
     uni.showToast({
       title: `${toolName} 开发中`,
