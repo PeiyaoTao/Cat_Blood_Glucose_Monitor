@@ -23,14 +23,21 @@
           </view>
           
           <view class="card-right">
-            <template v-if="currentTab === 0">
-              <text class="value-text" :class="getBgColorClass(item.bg_value)">{{ item.bg_value }}</text>
-              <text class="unit">mmol/L</text>
-            </template>
-            <template v-else>
-              <text class="value-text type-insulin">{{ item.dose }}</text>
-              <text class="unit">U</text>
-            </template>
+            <view class="value-wrap">
+              <template v-if="currentTab === 0">
+                <text class="value-text" :class="getBgColorClass(item.bg_value)">{{ item.bg_value }}</text>
+                <text class="unit">mmol/L</text>
+              </template>
+              <template v-else>
+                <text class="value-text type-insulin">{{ item.dose }}</text>
+                <text class="unit">U</text>
+              </template>
+            </view>
+            <view class="action-wrap">
+              <view class="delete-btn" @click.stop="onLongPress(item._id)">
+                <text class="icon-trash">🗑️</text> 删除
+              </view>
+            </view>
           </view>
           
         </view>
@@ -272,7 +279,30 @@ const getBgColorClass = (value: number) => {
   display: block;
 }
 .card-right {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-end;
+}
+.value-wrap {
+  margin-bottom: 24rpx;
   text-align: right;
+}
+.action-wrap {
+  margin-top: auto;
+}
+.delete-btn {
+  display: flex;
+  align-items: center;
+  font-size: 24rpx;
+  color: #E74C3C;
+  background: #FDEDEC;
+  padding: 8rpx 16rpx;
+  border-radius: 8rpx;
+}
+.icon-trash {
+  margin-right: 4rpx;
+  font-size: 24rpx;
 }
 .value-text {
   font-size: 48rpx;
