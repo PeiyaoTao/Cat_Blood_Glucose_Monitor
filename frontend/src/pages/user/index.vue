@@ -9,7 +9,8 @@
       </button>
       <view class="user-info">
         <input type="nickname" class="username-input" :value="userInfo.nickName" @blur="onNicknameBlur" @change="onNicknameChange" placeholder="点击输入铲屎官昵称" />
-        <text class="sub-text">ID: {{ userInfo.openid ? userInfo.openid.substring(0,8) + '...' : '获取中...' }}</text>
+        <text class="sub-text" @click="copyId" v-if="userInfo.openid">ID: {{ userInfo.openid.substring(0,8) }} <text style="font-size: 20rpx; color: #BDC3C7; margin-left: 8rpx;">[点击复制完整ID]</text></text>
+        <text class="sub-text" v-else>ID: 获取中...</text>
       </view>
     </view>
 
@@ -71,9 +72,12 @@ const login = async () => {
       if (res.result && res.result.openid) {
         userInfo.value.openid = res.result.openid
         saveUserInfo()
+      } else {
+        uni.showToast({ title: '获取ID失败', icon: 'none' })
       }
     } catch (e) {
       console.error('Login failed', e)
+      uni.showToast({ title: '登录云函数未部署，请先部署', icon: 'none' })
     }
   }
 }
@@ -94,6 +98,17 @@ const onNicknameChange = (e: any) => {
 
 const saveUserInfo = () => {
   uni.setStorageSync('userInfo', JSON.stringify(userInfo.value))
+}
+
+const copyId = () => {
+  if (userInfo.value.openid) {
+    uni.setClipboardData({
+      data: userInfo.value.openid,
+      success: () => {
+        uni.showToast({ title: '已复制完整 ID', icon: 'success' })
+      }
+    })
+  }
 }
 
 const handleMenuClick = (menuName: string) => {
