@@ -6,7 +6,7 @@ exports.main = async (event, context) => {
   const wxContext = cloud.getWXContext()
   const openid = wxContext.OPENID
 
-  const { triggerTime, catId, templateId } = event
+  const { triggerTime, catId, templateId, reminderType } = event
   
   if (!triggerTime || !templateId) {
     return { code: -1, msg: 'Missing parameters' }
@@ -19,6 +19,7 @@ exports.main = async (event, context) => {
         cat_id: catId || 'default',
         trigger_time: triggerTime,
         template_id: templateId,
+        reminder_type: reminderType || '医疗提醒',
         status: 'pending',
         create_time: db.serverDate()
       }

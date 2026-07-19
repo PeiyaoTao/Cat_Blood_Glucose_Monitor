@@ -21,12 +21,12 @@
         <text class="tool-desc">计算猫粮碳水</text>
       </view>
 
-      <view class="tool-card" @click="handleToolClick('医疗提醒')">
+      <view class="tool-card" @click="handleToolClick('设置提醒')">
         <view class="icon-wrap" style="background: #EBF5FB;">
           <view class="icon-svg icon-alarm"></view>
         </view>
-        <text class="tool-name">打针提醒</text>
-        <text class="tool-desc">准时注射不遗漏</text>
+        <text class="tool-name">设置提醒</text>
+        <text class="tool-desc">打针/测血糖不遗漏</text>
       </view>
       
       <view class="tool-card" @click="handleToolClick('导出报告')">
@@ -54,7 +54,7 @@ const handleToolClick = (toolName: string) => {
         exportExcel(days)
       }
     })
-  } else if (toolName === '医疗提醒' || toolName === '打针提醒') {
+  } else if (toolName === '医疗提醒' || toolName === '打针提醒' || toolName === '设置提醒') {
     uni.navigateTo({ url: '/pages/tools/alarm/index' })
   } else {
     uni.showToast({

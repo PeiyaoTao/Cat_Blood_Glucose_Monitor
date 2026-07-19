@@ -2,16 +2,24 @@
   <view class="container">
     <view class="header">
       <view class="icon-svg icon-alarm-large"></view>
-      <text class="title">下次打针提醒</text>
-      <text class="desc">设置提醒后，微信将通过服务通知准时提醒您为猫咪打针。</text>
+      <text class="title">下次医疗提醒</text>
+      <text class="desc">设置提醒后，微信将通过服务通知准时提醒您为猫咪进行操作。</text>
     </view>
 
     <view class="card">
       <view class="form-group">
+        <text class="label">提醒类型</text>
+        <view class="type-selector">
+          <view class="type-btn" :class="{ active: reminderType === '胰岛素注射' }" @click="reminderType = '胰岛素注射'">打针</view>
+          <view class="type-btn" :class="{ active: reminderType === '血糖检测' }" @click="reminderType = '血糖检测'">测血糖</view>
+        </view>
+      </view>
+
+      <view class="form-group">
         <text class="label">选择提醒时间</text>
         <picker mode="time" @change="onTimeChange" :value="selectedTime">
           <view class="picker-view">
-            {{ selectedTime || '请选择打针时间' }}
+            {{ selectedTime || '请选择提醒时间' }}
             <text class="icon-arrow">▼</text>
           </view>
         </picker>
@@ -43,6 +51,7 @@ import { ref, computed } from 'vue'
 const isSubmitting = ref(false)
 const selectedTime = ref('')
 const selectedDateObj = ref<Date | null>(null)
+const reminderType = ref('胰岛素注射') // '胰岛素注射' | '血糖检测'
 
 // 用户的模板 ID (你提供的)
 const TEMPLATE_ID = 'dx18s9lpowL9wetVsrwmvIqtOh2zgPt4J4vVxs_3C9s'
@@ -113,7 +122,8 @@ const saveReminderToCloud = async () => {
       data: {
         catId: catId,
         triggerTime: selectedDateObj.value!.getTime(),
-        templateId: TEMPLATE_ID
+        templateId: TEMPLATE_ID,
+        reminderType: reminderType.value
       }
     })
     
@@ -174,6 +184,27 @@ const saveReminderToCloud = async () => {
 }
 .form-group {
   margin-bottom: 40rpx;
+}
+.type-selector {
+  display: flex;
+  background: #F8F9FA;
+  border-radius: 16rpx;
+  padding: 8rpx;
+}
+.type-btn {
+  flex: 1;
+  text-align: center;
+  padding: 20rpx 0;
+  font-size: 28rpx;
+  color: var(--text-sub);
+  border-radius: 12rpx;
+  transition: all 0.3s;
+}
+.type-btn.active {
+  background: #FFFFFF;
+  color: #3498DB;
+  font-weight: 700;
+  box-shadow: 0 4rpx 12rpx rgba(0,0,0,0.05);
 }
 .label {
   font-size: 28rpx;

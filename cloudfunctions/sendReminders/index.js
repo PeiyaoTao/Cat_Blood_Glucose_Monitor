@@ -41,13 +41,13 @@ exports.main = async (event, context) => {
             // 例如你的字段名叫 "thing2", 这里就要改成 "thing2"
             // ==========================================
             thing1: {
-              value: '胰岛素注射'
+              value: task.reminder_type || '医疗提醒'
             },
             time2: {
               value: timeStr
             },
             thing3: {
-              value: '该给猫咪打针啦！'
+              value: task.reminder_type === '血糖检测' ? '该给猫咪测血糖啦！' : '该给猫咪打针啦！'
             }
           },
           miniprogramState: 'developer' // developer为开发版；trial为体验版；formal为正式版
