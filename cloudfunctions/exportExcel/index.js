@@ -61,9 +61,9 @@ exports.main = async (event, context) => {
       combined.push({
         timestamp: d.getTime(),
         date: dateStr,
-        time: item.time,
+        time: item.measure_time || `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`,
         event: '测血糖',
-        value: `${item.value} mmol/L`,
+        value: `${item.bg_value} mmol/L`,
         status: item.status || '',
         note: item.note || ''
       })
@@ -98,7 +98,8 @@ exports.main = async (event, context) => {
     glucoseRecords.forEach(item => {
       const d = new Date(item.createTime)
       const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
-      glucoseSheet.push([dateStr, item.time, `${item.value} mmol/L`, item.status || '-', item.note || '-'])
+      const tStr = item.measure_time || `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+      glucoseSheet.push([dateStr, tStr, `${item.bg_value} mmol/L`, item.status || '-', item.note || '-'])
     })
     if (glucoseSheet.length === 1) glucoseSheet.push(['暂无记录', '-', '-', '-', '-'])
 
