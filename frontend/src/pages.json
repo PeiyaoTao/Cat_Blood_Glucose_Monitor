@@ -13,6 +13,13 @@
 				"navigationBarTitleText": "记录血糖",
 				"navigationBarBackgroundColor": "#F7F9FC"
 			}
+		},
+		{
+			"path": "pages/log-insulin/index",
+			"style": {
+				"navigationBarTitleText": "记打针",
+				"navigationBarBackgroundColor": "#FFFFFF"
+			}
 		}
 	],
 	"globalStyle": {

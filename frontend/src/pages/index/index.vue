@@ -185,7 +185,9 @@ const handleLogGlucose = () => {
 }
 
 const handleLogInsulin = () => {
-  uni.showToast({ title: '准备开发: 录入打针', icon: 'none' })
+  uni.navigateTo({
+    url: '/pages/log-insulin/index'
+  })
 }
 
 const goToHistory = () => {
