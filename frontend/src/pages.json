@@ -20,8 +20,42 @@
 				"navigationBarTitleText": "记打针",
 				"navigationBarBackgroundColor": "#FFFFFF"
 			}
+		},
+		{
+			"path": "pages/tools/index",
+			"style": {
+				"navigationBarTitleText": "工具",
+				"navigationBarBackgroundColor": "#F7F9FC"
+			}
+		},
+		{
+			"path": "pages/user/index",
+			"style": {
+				"navigationBarTitleText": "我的",
+				"navigationBarBackgroundColor": "#F7F9FC"
+			}
 		}
 	],
+	"tabBar": {
+		"color": "#95A5A6",
+		"selectedColor": "#2ECC71",
+		"backgroundColor": "#FFFFFF",
+		"borderStyle": "white",
+		"list": [
+			{
+				"pagePath": "pages/index/index",
+				"text": "主页"
+			},
+			{
+				"pagePath": "pages/tools/index",
+				"text": "工具"
+			},
+			{
+				"pagePath": "pages/user/index",
+				"text": "我的"
+			}
+		]
+	},
 	"globalStyle": {
 		"navigationBarTextStyle": "black",
 		"navigationBarTitleText": "猫咪控糖日记",
