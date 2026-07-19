@@ -36,8 +36,6 @@
       <view class="chart-placeholder">
         <qiun-data-charts 
           type="line"
-          canvasId="glucoseChart"
-          :canvas2d="true"
           :opts="chartOpts"
           :chartData="chartData"
         />
