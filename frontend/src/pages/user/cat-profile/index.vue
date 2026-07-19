@@ -3,7 +3,9 @@
     <view class="avatar-section">
       <button class="avatar-wrapper" open-type="chooseAvatar" @chooseavatar="onChooseAvatar" @click="handleAvatarClick">
         <image class="avatar-img" :src="formData.avatar || 'https://api.dicebear.com/7.x/notionists/svg?seed=Felix&backgroundColor=FFDAB9'" mode="aspectFill"></image>
-        <view class="avatar-edit-icon">📷</view>
+        <view class="avatar-edit-icon">
+          <view class="icon-svg icon-camera"></view>
+        </view>
       </button>
       <text class="avatar-tip">点击修改猫咪头像</text>
     </view>
@@ -248,6 +250,14 @@ const saveProfile = async () => {
   font-size: 30rpx;
   border: 4rpx solid #FFFFFF;
 }
+.icon-svg {
+  width: 28rpx;
+  height: 28rpx;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+.icon-camera { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23FFFFFF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z'/%3E%3Ccircle cx='12' cy='13' r='3'/%3E%3C/svg%3E"); }
 .avatar-tip {
   margin-top: 16rpx;
   font-size: 24rpx;

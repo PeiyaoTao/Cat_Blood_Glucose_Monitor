@@ -20,10 +20,10 @@
       <view class="card-title">今日操作</view>
       <view class="btn-group">
         <button class="btn btn-primary log-btn" @click="handleLogGlucose">
-          <text class="icon">🩸</text> 记血糖
+          <view class="icon-svg icon-blood"></view> 记血糖
         </button>
         <button class="btn btn-secondary log-btn" @click="handleLogInsulin">
-          <text class="icon">💉</text> 记打针
+          <view class="icon-svg icon-syringe"></view> 记打针
         </button>
       </view>
     </view>
@@ -95,7 +95,10 @@
     <!-- 免责声明与引用 -->
     <view class="disclaimer">
       <text class="disclaimer-text">* 默认目标血糖范围 (5.0~15.0 mmol/L) 建议参考自中国兽医协会(CVMA)《犬猫糖尿病的筛查和诊断》(T/CVMA 195-2024)及主流猫病指南。</text>
-      <text class="disclaimer-text bold">⚠️ 免责声明：本程序仅供数据追踪与辅助记录，不构成医疗诊断建议。任何胰岛素剂量的调整，请务必遵从主治兽医的医嘱。</text>
+      <view class="disclaimer-alert">
+        <view class="icon-svg icon-alert"></view>
+        <text class="disclaimer-text bold">免责声明：本程序仅供追踪与辅助，不构成医疗诊断。任何剂量的调整，请遵从主治兽医医嘱。</text>
+      </view>
     </view>
   </view>
 </template>
@@ -402,9 +405,19 @@ const getGlucoseClass = (val: number) => {
   align-items: center;
   justify-content: center;
 }
-.icon {
+.icon-svg {
+  width: 40rpx;
+  height: 40rpx;
   margin-right: 12rpx;
-  font-size: 36rpx;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+.icon-blood {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23FFFFFF' stroke='%23FFFFFF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z'/%3E%3C/svg%3E");
+}
+.icon-syringe {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23FF8A65' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m18 2 4 4'/%3E%3Cpath d='m17 7 3-3'/%3E%3Cpath d='M19 9 8.7 19.3c-1 1-2.5 1-3.4 0l-.6-.6c-1-1-1-2.5 0-3.4L15 5'/%3E%3Cpath d='m9 11 4 4'/%3E%3Cpath d='m5 19-3 3'/%3E%3Cpath d='m14 4 6 6'/%3E%3C/svg%3E");
 }
 
 /* 图表占位 */
@@ -475,10 +488,22 @@ const getGlucoseClass = (val: number) => {
   flex-direction: column;
   gap: 12rpx;
 }
+.disclaimer-alert {
+  display: flex;
+  align-items: flex-start;
+  margin-top: 8rpx;
+}
+.icon-alert {
+  width: 32rpx;
+  height: 32rpx;
+  margin-right: 8rpx;
+  flex-shrink: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2395A5A6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z'/%3E%3Cpath d='M12 9v4'/%3E%3Cpath d='M12 17h.01'/%3E%3C/svg%3E");
+}
 .disclaimer-text {
   font-size: 20rpx;
   color: #BDC3C7;
-  text-align: center;
+  text-align: left;
   line-height: 1.5;
 }
 .disclaimer-text.bold {

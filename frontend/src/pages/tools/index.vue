@@ -6,32 +6,32 @@
 
     <view class="tools-grid">
       <view class="tool-card" @click="handleToolClick('单位换算器')">
-        <view class="icon-wrap" style="background: #E8F8F5; color: #2ECC71;">
-          <text class="icon">🔄</text>
+        <view class="icon-wrap" style="background: #E8F8F5;">
+          <view class="icon-svg icon-convert"></view>
         </view>
         <text class="tool-name">单位换算</text>
         <text class="tool-desc">mmol/L ↔ mg/dL</text>
       </view>
 
       <view class="tool-card" @click="handleToolClick('干物质计算器')">
-        <view class="icon-wrap" style="background: #FEF9E7; color: #F1C40F;">
-          <text class="icon">🥩</text>
+        <view class="icon-wrap" style="background: #FEF9E7;">
+          <view class="icon-svg icon-food"></view>
         </view>
         <text class="tool-name">干物质计算</text>
         <text class="tool-desc">计算猫粮碳水</text>
       </view>
 
       <view class="tool-card" @click="handleToolClick('医疗提醒')">
-        <view class="icon-wrap" style="background: #EBF5FB; color: #3498DB;">
-          <text class="icon">⏰</text>
+        <view class="icon-wrap" style="background: #EBF5FB;">
+          <view class="icon-svg icon-alarm"></view>
         </view>
         <text class="tool-name">打针提醒</text>
         <text class="tool-desc">准时注射不遗漏</text>
       </view>
       
       <view class="tool-card" @click="handleToolClick('导出报告')">
-        <view class="icon-wrap" style="background: #FDEDEC; color: #E74C3C;">
-          <text class="icon">📊</text>
+        <view class="icon-wrap" style="background: #FDEDEC;">
+          <view class="icon-svg icon-report"></view>
         </view>
         <text class="tool-name">导出报告</text>
         <text class="tool-desc">生成就诊 Excel</text>
@@ -164,4 +164,15 @@ const exportExcel = async (days: number) => {
   font-size: 24rpx;
   color: var(--text-sub);
 }
+.icon-svg {
+  width: 44rpx;
+  height: 44rpx;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+.icon-convert { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232ECC71' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m16 3 4 4-4 4'/%3E%3Cpath d='M20 7H4'/%3E%3Cpath d='m8 21-4-4 4-4'/%3E%3Cpath d='M4 17h16'/%3E%3C/svg%3E"); }
+.icon-food { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F1C40F' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21.21 15.89A10 10 0 1 1 8 2.83'/%3E%3Cpath d='M22 12A10 10 0 0 0 12 2v10z'/%3E%3C/svg%3E"); }
+.icon-alarm { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233498DB' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpolyline points='12 6 12 12 16 14'/%3E%3C/svg%3E"); }
+.icon-report { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23E74C3C' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='12' x2='12' y1='20' y2='10'/%3E%3Cline x1='18' x2='18' y1='20' y2='4'/%3E%3Cline x1='6' x2='6' y1='20' y2='16'/%3E%3C/svg%3E"); }
 </style>

@@ -41,7 +41,7 @@
       </view>
       
       <view class="indicator-box" :style="{ backgroundColor: indicatorBg }">
-        <text class="emoji">{{ indicatorEmoji }}</text>
+        <view class="status-dot" :style="{ backgroundColor: indicatorColor }"></view>
         <text class="eval-text">{{ indicatorText }}</text>
       </view>
     </view>
@@ -97,12 +97,7 @@ const indicatorBg = computed(() => {
   return '#FDEDEC'
 })
 
-const indicatorEmoji = computed(() => {
-  const val = parseFloat(dmCarbs.value as string)
-  if (val <= 8) return '🟢'
-  if (val <= 15) return '🟡'
-  return '🔴'
-})
+// Removed emoji computed
 
 const indicatorText = computed(() => {
   const val = parseFloat(dmCarbs.value as string)
@@ -128,6 +123,6 @@ input:focus { background: #FFFFFF; border-color: var(--primary-light); }
 .result-row.highlight { font-size: 36rpx; font-weight: 700; margin-top: 32rpx; }
 .dm-carbs { font-size: 48rpx; font-weight: 800; }
 .indicator-box { margin-top: 40rpx; padding: 32rpx; border-radius: 16rpx; display: flex; align-items: flex-start; }
-.emoji { font-size: 40rpx; margin-right: 16rpx; }
+.status-dot { width: 32rpx; height: 32rpx; border-radius: 16rpx; margin-right: 16rpx; flex-shrink: 0; margin-top: 6rpx; box-shadow: 0 4rpx 8rpx rgba(0,0,0,0.1); }
 .eval-text { font-size: 28rpx; line-height: 1.5; color: var(--text-main); flex: 1; font-weight: 500;}
 </style>

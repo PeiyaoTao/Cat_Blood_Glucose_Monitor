@@ -4,7 +4,7 @@
     <view class="user-card">
       <button class="avatar-wrap btn-clear" open-type="chooseAvatar" @chooseavatar="onChooseAvatar">
         <image v-if="userInfo.avatarUrl" class="avatar-img" :src="userInfo.avatarUrl" mode="aspectFill"></image>
-        <text v-else class="avatar-emoji">👤</text>
+        <view v-else class="icon-svg icon-user"></view>
         <view class="edit-badge">✎</view>
       </button>
       <view class="user-info">
@@ -17,22 +17,22 @@
     <!-- 菜单列表 -->
     <view class="menu-list card">
       <view class="menu-item" @click="handleMenuClick('猫咪档案')">
-        <text class="menu-icon">🐈</text>
+        <view class="icon-svg icon-cat"></view>
         <text class="menu-text">管理猫咪档案</text>
         <text class="arrow">›</text>
       </view>
       <view class="menu-item" @click="handleMenuClick('家庭共享')">
-        <text class="menu-icon">👨‍👩‍👧</text>
+        <view class="icon-svg icon-family"></view>
         <text class="menu-text">家庭成员共享</text>
         <text class="arrow">›</text>
       </view>
       <view class="menu-item" @click="handleMenuClick('使用帮助')">
-        <text class="menu-icon">📖</text>
+        <view class="icon-svg icon-book"></view>
         <text class="menu-text">使用帮助与医学免责</text>
         <text class="arrow">›</text>
       </view>
       <view class="menu-item" @click="handleMenuClick('关于我们')">
-        <text class="menu-icon">ℹ️</text>
+        <view class="icon-svg icon-info"></view>
         <text class="menu-text">关于我们</text>
         <text class="arrow">›</text>
       </view>
@@ -166,9 +166,6 @@ const handleMenuClick = (menuName: string) => {
   height: 100%;
   border-radius: 50%;
 }
-.avatar-emoji {
-  font-size: 64rpx;
-}
 .edit-badge {
   position: absolute;
   right: -8rpx;
@@ -216,10 +213,6 @@ const handleMenuClick = (menuName: string) => {
 .menu-item:last-child {
   border-bottom: none;
 }
-.menu-icon {
-  font-size: 40rpx;
-  margin-right: 24rpx;
-}
 .menu-text {
   flex: 1;
   font-size: 32rpx;
@@ -230,4 +223,17 @@ const handleMenuClick = (menuName: string) => {
   color: #BDC3C7;
   font-weight: 600;
 }
+.icon-svg {
+  width: 44rpx;
+  height: 44rpx;
+  margin-right: 24rpx;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+.icon-user { width: 64rpx; height: 64rpx; margin: 0; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23BDC3C7' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2'/%3E%3Ccircle cx='12' cy='7' r='4'/%3E%3C/svg%3E"); }
+.icon-cat { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23E67E22' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 5c.67 0 1.35.09 2 .26 1.78-2 5.03-2.84 6.42-2.26 1.4.58-.42 7-.42 7 .57 1.07 1 2.24 1 3.44C21 17.9 16.97 21 12 21s-9-3-9-7.56c0-1.25.5-2.4 1.1-3.44 0 0-1.89-6.42-.5-7 1.39-.58 4.72.23 6.5 2.23A9.04 9.04 0 0 1 12 5Z'/%3E%3Cpath d='M8 14v.5'/%3E%3Cpath d='M16 14v.5'/%3E%3Cpath d='M11.25 16.25h1.5L12 17l-.75-.75Z'/%3E%3C/svg%3E"); }
+.icon-family { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233498DB' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2'/%3E%3Ccircle cx='9' cy='7' r='4'/%3E%3Cpath d='M22 21v-2a4 4 0 0 0-3-3.87'/%3E%3Cpath d='M16 3.13a4 4 0 0 1 0 7.75'/%3E%3C/svg%3E"); }
+.icon-book { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232ECC71' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20'/%3E%3C/svg%3E"); }
+.icon-info { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239B59B6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 16v-4'/%3E%3Cpath d='M12 8h.01'/%3E%3C/svg%3E"); }
 </style>
