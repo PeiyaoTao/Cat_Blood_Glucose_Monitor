@@ -1,0 +1,10 @@
+{
+  "name": "export-excel",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "dependencies": {
+    "node-xlsx": "^0.24.0",
+    "wx-server-sdk": "~2.6.3"
+  }
+}

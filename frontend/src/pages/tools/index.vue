@@ -46,11 +46,70 @@ const handleToolClick = (toolName: string) => {
     uni.navigateTo({ url: '/pages/tools/converter/index' })
   } else if (toolName === '干物质计算器' || toolName === '干物质计算') {
     uni.navigateTo({ url: '/pages/tools/dry-matter/index' })
+  } else if (toolName === '导出报告') {
+    uni.showActionSheet({
+      itemList: ['导出最近 30 天 (推荐)', '导出全部记录'],
+      success: function (res) {
+        const days = res.tapIndex === 0 ? 30 : 0
+        exportExcel(days)
+      }
+    })
   } else {
     uni.showToast({
       title: `${toolName} 开发中`,
       icon: 'none'
     })
+  }
+}
+
+const exportExcel = async (days: number) => {
+  // @ts-ignore
+  if (typeof wx === 'undefined' || !wx.cloud) return
+  
+  uni.showLoading({ title: '正在生成表格...', mask: true })
+  
+  try {
+    // @ts-ignore
+    const res = await wx.cloud.callFunction({
+      name: 'exportExcel',
+      data: { days }
+    })
+    
+    if (res.result && res.result.code === 0 && res.result.fileID) {
+      uni.showLoading({ title: '正在下载文件...' })
+      // @ts-ignore
+      wx.cloud.downloadFile({
+        fileID: res.result.fileID,
+        success: (downloadRes: any) => {
+          uni.hideLoading()
+          // @ts-ignore
+          wx.openDocument({
+            filePath: downloadRes.tempFilePath,
+            showMenu: true, // 允许用户转发
+            success: function () {
+              console.log('打开文档成功')
+            },
+            fail: function (err: any) {
+              uni.showToast({ title: '打开失败，请稍后重试', icon: 'none' })
+              console.error(err)
+            }
+          })
+        },
+        fail: (err: any) => {
+          uni.hideLoading()
+          uni.showToast({ title: '下载失败', icon: 'none' })
+          console.error(err)
+        }
+      })
+    } else {
+      uni.hideLoading()
+      uni.showToast({ title: '生成失败，请检查云函数部署', icon: 'none' })
+      console.error(res.result)
+    }
+  } catch (err) {
+    uni.hideLoading()
+    console.error('调用云函数失败', err)
+    uni.showToast({ title: '调用失败，请确保云函数 exportExcel 已部署', icon: 'none' })
   }
 }
 </script>
