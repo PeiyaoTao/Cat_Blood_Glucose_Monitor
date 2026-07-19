@@ -42,10 +42,14 @@
 
 <script setup lang="ts">
 const handleToolClick = (toolName: string) => {
-  uni.showToast({
-    title: `${toolName} 开发中`,
-    icon: 'none'
-  })
+  if (toolName === '单位换算') {
+    uni.navigateTo({ url: '/pages/tools/converter/index' })
+  } else {
+    uni.showToast({
+      title: `${toolName} 开发中`,
+      icon: 'none'
+    })
+  }
 }
 </script>
 

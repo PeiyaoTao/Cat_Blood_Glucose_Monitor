@@ -22,6 +22,13 @@
 			}
 		},
 		{
+			"path": "pages/tools/converter/index",
+			"style": {
+				"navigationBarTitleText": "单位换算",
+				"navigationBarBackgroundColor": "#F7F9FC"
+			}
+		},
+		{
 			"path": "pages/tools/index",
 			"style": {
 				"navigationBarTitleText": "工具",
