@@ -3,7 +3,7 @@
     <!-- 头部：猫咪档案概览 -->
     <view class="header">
       <view class="avatar-wrap">
-        <image class="avatar" src="https://api.dicebear.com/7.x/notionists/svg?seed=Felix&backgroundColor=FFDAB9" mode="aspectFill"></image>
+        <image class="avatar" :src="catInfo.avatar || 'https://api.dicebear.com/7.x/notionists/svg?seed=Felix&backgroundColor=FFDAB9'" mode="aspectFill"></image>
       </view>
       <view class="info">
         <text class="greeting">早安，主人</text>
@@ -105,15 +105,15 @@ import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import qiunDataCharts from 'ch-ucharts/components/qiun-data-charts/qiun-data-charts.vue'
 
-// 猫咪预设标准 (根据 CVMA 195-2024)
 const catInfo = ref({
+  avatar: '',
   name: '小煤球',
   age: 6,
   daysSinceDiagnosis: 0,
   targetMin: 5.0,
   targetMax: 15.0,
-  thresholdNormalMax: 7.0, // <= 7.0 为正常空腹/随机血糖上限
-  thresholdDangerMin: 15.0 // >= 15.0 属于极高危(诊断标准 5.1.2 d)
+  thresholdNormalMax: 7.0,
+  thresholdDangerMin: 15.0
 })
 
 const recentRecords = ref<any[]>([])
@@ -156,9 +156,21 @@ const fetchCatProfile = async () => {
     // @ts-ignore
     const db = wx.cloud.database()
     const res = await db.collection('cats').limit(1).get()
-    if (res.data && res.data.length > 0) {
+      if (res.data && res.data.length > 0) {
       const cat = res.data[0]
       catInfo.value.name = cat.name || '小煤球'
+      catInfo.value.avatar = cat.avatar || ''
+      
+      if (cat.birthday) {
+        const bDate = new Date(cat.birthday)
+        const today = new Date()
+        let ageNum = today.getFullYear() - bDate.getFullYear()
+        const m = today.getMonth() - bDate.getMonth()
+        if (m < 0 || (m === 0 && today.getDate() < bDate.getDate())) {
+            ageNum--
+        }
+        catInfo.value.age = ageNum > 0 ? ageNum : 0
+      }
       
       if (cat.diagnosis_date) {
         const dDate = new Date(cat.diagnosis_date)

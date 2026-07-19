@@ -1,11 +1,29 @@
 <template>
   <view class="container">
+    <view class="avatar-section">
+      <button class="avatar-wrapper" open-type="chooseAvatar" @chooseavatar="onChooseAvatar" @click="handleAvatarClick">
+        <image class="avatar-img" :src="formData.avatar || 'https://api.dicebear.com/7.x/notionists/svg?seed=Felix&backgroundColor=FFDAB9'" mode="aspectFill"></image>
+        <view class="avatar-edit-icon">📷</view>
+      </button>
+      <text class="avatar-tip">点击修改猫咪头像</text>
+    </view>
+
     <view class="card">
       <view class="form-group">
         <text class="label">猫咪昵称</text>
         <view class="input-wrap">
           <input type="text" v-model="formData.name" placeholder="请输入猫咪昵称" />
         </view>
+      </view>
+
+      <view class="form-group">
+        <text class="label">出生日期</text>
+        <picker mode="date" @change="onBirthdayChange" :value="formData.birthday">
+          <view class="picker-view">
+            {{ formData.birthday || '请选择出生日期' }}
+            <text class="icon-arrow">▼</text>
+          </view>
+        </picker>
       </view>
 
       <view class="form-group">
@@ -54,7 +72,9 @@ const isSubmitting = ref(false)
 const docId = ref('')
 
 const formData = ref({
+  avatar: '',
   name: '',
+  birthday: '',
   weight: '',
   diagnosis_date: '',
   targetMin: 5.0,
@@ -73,7 +93,9 @@ onLoad(async () => {
         const cat = res.data[0]
         docId.value = cat._id
         formData.value = {
+          avatar: cat.avatar || '',
           name: cat.name || '',
+          birthday: cat.birthday || '',
           weight: cat.weight || '',
           diagnosis_date: cat.diagnosis_date || '',
           targetMin: cat.targetMin || 5.0,
@@ -90,6 +112,47 @@ const onDateChange = (e: any) => {
   formData.value.diagnosis_date = e.detail.value
 }
 
+const onBirthdayChange = (e: any) => {
+  formData.value.birthday = e.detail.value
+}
+
+const handleAvatarClick = () => {
+  // @ts-ignore
+  if (typeof wx === 'undefined') return // 非微信环境的回退
+  // @ts-ignore
+  wx.chooseMedia({
+    count: 1,
+    mediaType: ['image'],
+    sizeType: ['compressed'],
+    success: (res: any) => {
+      uploadAvatar(res.tempFiles[0].tempFilePath)
+    }
+  })
+}
+
+const onChooseAvatar = (e: any) => {
+  // 兼容最新的头像选择器(获取微信头像), 顺便也可以用作猫咪头像(虽然很少见)
+  const { avatarUrl } = e.detail
+  uploadAvatar(avatarUrl)
+}
+
+const uploadAvatar = async (filePath: string) => {
+  uni.showLoading({ title: '正在上传头像...' })
+  try {
+    // @ts-ignore
+    const uploadRes = await wx.cloud.uploadFile({
+      cloudPath: `avatars/cat_${Date.now()}_${Math.floor(Math.random() * 1000)}.jpg`,
+      filePath: filePath,
+    })
+    formData.value.avatar = uploadRes.fileID
+    uni.hideLoading()
+  } catch (err) {
+    console.error('Avatar upload error', err)
+    uni.hideLoading()
+    uni.showToast({ title: '头像上传失败', icon: 'none' })
+  }
+}
+
 const saveProfile = async () => {
   if (!formData.value.name) {
     uni.showToast({ title: '请输入猫咪名字', icon: 'none' })
@@ -103,7 +166,9 @@ const saveProfile = async () => {
       // @ts-ignore
       const db = wx.cloud.database()
       const dataToSave = {
+        avatar: formData.value.avatar,
         name: formData.value.name,
+        birthday: formData.value.birthday,
         weight: parseFloat(formData.value.weight),
         diagnosis_date: formData.value.diagnosis_date,
         targetMin: parseFloat(formData.value.targetMin as any),
@@ -141,6 +206,52 @@ const saveProfile = async () => {
   padding: 32rpx;
   min-height: 100vh;
   background-color: var(--bg-color);
+}
+.avatar-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 40rpx;
+  padding-top: 20rpx;
+}
+.avatar-wrapper {
+  padding: 0;
+  margin: 0;
+  width: 180rpx;
+  height: 180rpx;
+  border-radius: 90rpx;
+  position: relative;
+  border: 6rpx solid #FFFFFF;
+  box-shadow: 0 8rpx 24rpx rgba(0,0,0,0.08);
+  background: var(--primary-light);
+  overflow: visible;
+}
+.avatar-wrapper::after {
+  border: none;
+}
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 90rpx;
+}
+.avatar-edit-icon {
+  position: absolute;
+  right: -10rpx;
+  bottom: 0rpx;
+  width: 60rpx;
+  height: 60rpx;
+  background: var(--primary);
+  border-radius: 30rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30rpx;
+  border: 4rpx solid #FFFFFF;
+}
+.avatar-tip {
+  margin-top: 16rpx;
+  font-size: 24rpx;
+  color: var(--text-sub);
 }
 .card {
   background: #FFFFFF;
