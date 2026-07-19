@@ -109,10 +109,9 @@ import qiunDataCharts from 'ch-ucharts/components/qiun-data-charts/qiun-data-cha
 const catInfo = ref({
   name: '小煤球',
   age: 6,
-  daysSinceDiagnosis: 142,
+  daysSinceDiagnosis: 0,
   targetMin: 5.0,
   targetMax: 15.0,
-  // 警戒阈值
   thresholdNormalMax: 7.0, // <= 7.0 为正常空腹/随机血糖上限
   thresholdDangerMin: 15.0 // >= 15.0 属于极高危(诊断标准 5.1.2 d)
 })
@@ -149,6 +148,37 @@ const chartOpts = ref({
     }
   }
 })
+
+const fetchCatProfile = async () => {
+  // @ts-ignore
+  if (typeof wx === 'undefined' || !wx.cloud) return
+  try {
+    // @ts-ignore
+    const db = wx.cloud.database()
+    const res = await db.collection('cats').limit(1).get()
+    if (res.data && res.data.length > 0) {
+      const cat = res.data[0]
+      catInfo.value.name = cat.name || '小煤球'
+      
+      if (cat.diagnosis_date) {
+        const dDate = new Date(cat.diagnosis_date)
+        const today = new Date()
+        const diffTime = Math.abs(today.getTime() - dDate.getTime())
+        catInfo.value.daysSinceDiagnosis = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+      }
+      
+      // Update chart targets if customized
+      if (cat.targetMin && cat.targetMax) {
+        chartOpts.value.extra.markLine.data = [
+          { value: cat.targetMin, color: '#2ECC71' },
+          { value: cat.targetMax, color: '#E74C3C' }
+        ]
+      }
+    }
+  } catch (err) {
+    console.log('No customized cat profile found yet')
+  }
+}
 
 const fetchRecentRecords = async () => {
   // @ts-ignore
@@ -234,6 +264,7 @@ const formatDisplayTime = (date: Date) => {
 }
 
 onShow(() => {
+  fetchCatProfile()
   fetchRecentRecords()
   fetchRecentInsulins()
 })

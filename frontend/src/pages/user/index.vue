@@ -2,12 +2,14 @@
   <view class="container">
     <!-- 用户卡片 -->
     <view class="user-card">
-      <view class="avatar-wrap">
-        <text class="avatar-emoji">👤</text>
-      </view>
+      <button class="avatar-wrap btn-clear" open-type="chooseAvatar" @chooseavatar="onChooseAvatar">
+        <image v-if="userInfo.avatarUrl" class="avatar-img" :src="userInfo.avatarUrl" mode="aspectFill"></image>
+        <text v-else class="avatar-emoji">👤</text>
+        <view class="edit-badge">✎</view>
+      </button>
       <view class="user-info">
-        <text class="username">未登录主人</text>
-        <text class="sub-text">点击微信授权登录</text>
+        <input type="nickname" class="username-input" :value="userInfo.nickName" @blur="onNicknameBlur" @change="onNicknameChange" placeholder="点击输入铲屎官昵称" />
+        <text class="sub-text">ID: {{ userInfo.openid ? userInfo.openid.substring(0,8) + '...' : '获取中...' }}</text>
       </view>
     </view>
 
@@ -38,11 +40,72 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+
+const userInfo = ref({
+  avatarUrl: '',
+  nickName: '铲屎官',
+  openid: ''
+})
+
+onLoad(() => {
+  // 从本地缓存读取用户信息
+  const cachedInfo = uni.getStorageSync('userInfo')
+  if (cachedInfo) {
+    userInfo.value = JSON.parse(cachedInfo)
+  }
+  
+  // 如果没有 openid，执行静默登录
+  if (!userInfo.value.openid) {
+    login()
+  }
+})
+
+const login = async () => {
+  // @ts-ignore
+  if (typeof wx !== 'undefined' && wx.cloud) {
+    try {
+      // @ts-ignore
+      const res = await wx.cloud.callFunction({ name: 'login' })
+      if (res.result && res.result.openid) {
+        userInfo.value.openid = res.result.openid
+        saveUserInfo()
+      }
+    } catch (e) {
+      console.error('Login failed', e)
+    }
+  }
+}
+
+const onChooseAvatar = (e: any) => {
+  userInfo.value.avatarUrl = e.detail.avatarUrl
+  saveUserInfo()
+}
+
+const onNicknameBlur = (e: any) => {
+  userInfo.value.nickName = e.detail.value
+  saveUserInfo()
+}
+const onNicknameChange = (e: any) => {
+  userInfo.value.nickName = e.detail.value
+  saveUserInfo()
+}
+
+const saveUserInfo = () => {
+  uni.setStorageSync('userInfo', JSON.stringify(userInfo.value))
+}
+
 const handleMenuClick = (menuName: string) => {
-  uni.showToast({
-    title: `${menuName} 功能开发中`,
-    icon: 'none'
-  })
+  if (menuName === '猫咪档案') {
+    uni.navigateTo({ url: '/pages/user/cat-profile/index' })
+  } else if (menuName === '家庭共享') {
+    uni.navigateTo({ url: '/pages/user/family/index' })
+  } else if (menuName === '使用帮助' || menuName === '关于我们') {
+    uni.navigateTo({ url: '/pages/user/about/index' })
+  } else {
+    uni.showToast({ title: `${menuName} 功能开发中`, icon: 'none' })
+  }
 }
 </script>
 
@@ -61,28 +124,63 @@ const handleMenuClick = (menuName: string) => {
   margin-bottom: 40rpx;
   box-shadow: 0 4rpx 16rpx rgba(0,0,0,0.02);
 }
+.btn-clear {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  line-height: normal;
+  border-radius: 0;
+}
+.btn-clear::after {
+  display: none;
+}
 .avatar-wrap {
-  width: 120rpx;
-  height: 120rpx;
+  width: 130rpx;
+  height: 130rpx;
   background: #F7F9FC;
-  border-radius: 60rpx;
+  border-radius: 65rpx;
   display: flex;
   align-items: center;
   justify-content: center;
   margin-right: 32rpx;
+  position: relative;
+  overflow: visible;
+}
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
 }
 .avatar-emoji {
-  font-size: 60rpx;
+  font-size: 64rpx;
+}
+.edit-badge {
+  position: absolute;
+  right: -8rpx;
+  bottom: -8rpx;
+  background: var(--primary);
+  color: white;
+  width: 40rpx;
+  height: 40rpx;
+  border-radius: 20rpx;
+  font-size: 24rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 4rpx solid #fff;
 }
 .user-info {
   display: flex;
   flex-direction: column;
+  flex: 1;
 }
-.username {
+.username-input {
   font-size: 40rpx;
   font-weight: 800;
   color: var(--text-main);
   margin-bottom: 8rpx;
+  height: 50rpx;
+  line-height: 50rpx;
 }
 .sub-text {
   font-size: 28rpx;
