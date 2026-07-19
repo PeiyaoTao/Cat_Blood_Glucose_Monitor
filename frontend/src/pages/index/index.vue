@@ -58,6 +58,12 @@
         </view>
       </view>
     </view>
+
+    <!-- 免责声明与引用 -->
+    <view class="disclaimer">
+      <text class="disclaimer-text">* 默认目标血糖范围 (5.0~15.0 mmol/L) 建议参考自 AAHA (美国动物医院协会) 犬猫糖尿病管理指南。</text>
+      <text class="disclaimer-text bold">⚠️ 免责声明：本程序仅供数据追踪与辅助记录，不构成医疗诊断建议。任何胰岛素剂量的调整，请务必遵从主治兽医的医嘱。</text>
+    </view>
   </view>
 </template>
 
@@ -305,5 +311,23 @@ const getGlucoseClass = (val: number) => {
 }
 .text-danger {
   color: var(--danger-red);
+}
+
+/* 免责声明 */
+.disclaimer {
+  padding: 20rpx 16rpx 40rpx 16rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+.disclaimer-text {
+  font-size: 20rpx;
+  color: #BDC3C7;
+  text-align: center;
+  line-height: 1.5;
+}
+.disclaimer-text.bold {
+  font-weight: 600;
+  color: #95A5A6;
 }
 </style>
