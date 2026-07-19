@@ -42,8 +42,10 @@
 
 <script setup lang="ts">
 const handleToolClick = (toolName: string) => {
-  if (toolName === '单位换算') {
+  if (toolName === '单位换算器' || toolName === '单位换算') {
     uni.navigateTo({ url: '/pages/tools/converter/index' })
+  } else if (toolName === '干物质计算器' || toolName === '干物质计算') {
+    uni.navigateTo({ url: '/pages/tools/dry-matter/index' })
   } else {
     uni.showToast({
       title: `${toolName} 开发中`,

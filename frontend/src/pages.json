@@ -29,6 +29,13 @@
 			}
 		},
 		{
+			"path": "pages/tools/dry-matter/index",
+			"style": {
+				"navigationBarTitleText": "干物质计算",
+				"navigationBarBackgroundColor": "#F7F9FC"
+			}
+		},
+		{
 			"path": "pages/tools/index",
 			"style": {
 				"navigationBarTitleText": "工具",
