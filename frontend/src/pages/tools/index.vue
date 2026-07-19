@@ -69,10 +69,10 @@ const exportExcel = async (days: number) => {
   uni.showLoading({ title: '正在生成表格...', mask: true })
   
   try {
-    // @ts-ignore
+    const catId = uni.getStorageSync('currentCatId') || 'default'
     const res = await wx.cloud.callFunction({
       name: 'exportExcel',
-      data: { days }
+      data: { days, catId }
     })
     
     if (res.result && res.result.code === 0 && res.result.fileID) {

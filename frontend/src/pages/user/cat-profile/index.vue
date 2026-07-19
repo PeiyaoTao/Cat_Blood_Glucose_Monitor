@@ -83,29 +83,30 @@ const formData = ref({
   targetMax: 15.0
 })
 
-onLoad(async () => {
-  // 页面加载时拉取现有档案
+onLoad(async (options: any) => {
   // @ts-ignore
   if (typeof wx !== 'undefined' && wx.cloud) {
     try {
       // @ts-ignore
       const db = wx.cloud.database()
-      const res = await db.collection('cats').limit(1).get()
-      if (res.data && res.data.length > 0) {
-        const cat = res.data[0]
-        docId.value = cat._id
-        formData.value = {
-          avatar: cat.avatar || '',
-          name: cat.name || '',
-          birthday: cat.birthday || '',
-          weight: cat.weight || '',
-          diagnosis_date: cat.diagnosis_date || '',
-          targetMin: cat.targetMin || 5.0,
-          targetMax: cat.targetMax || 15.0
+      if (options && options.id) {
+        const res = await db.collection('cats').doc(options.id).get()
+        if (res.data) {
+          const cat = res.data
+          docId.value = cat._id
+          formData.value = {
+            avatar: cat.avatar || '',
+            name: cat.name || '',
+            birthday: cat.birthday || '',
+            weight: cat.weight || '',
+            diagnosis_date: cat.diagnosis_date || '',
+            targetMin: cat.targetMin || 5.0,
+            targetMax: cat.targetMax || 15.0
+          }
         }
       }
     } catch (e) {
-      console.log('No existing cat profile', e)
+      console.log('Error fetching cat profile', e)
     }
   }
 })
@@ -185,6 +186,7 @@ const saveProfile = async () => {
         // 新建记录
         const res = await db.collection('cats').add({ data: dataToSave })
         docId.value = res._id
+        uni.setStorageSync('currentCatId', res._id)
       }
       
       uni.showToast({ title: '保存成功', icon: 'success' })

@@ -7,9 +7,10 @@
       </view>
       <view class="info">
         <text class="greeting">早安，主人</text>
-        <view class="name-row">
-          <text class="name">{{ catInfo.name }}</text>
-          <text class="tag">{{ catInfo.age }}岁</text>
+        <view class="name-row" @click="handleSwitchCat">
+          <text class="name">{{ catInfo.name || '未命名' }}</text>
+          <view class="icon-svg icon-switch"></view>
+          <text class="tag" v-if="catInfo.age !== null">{{ catInfo.age }}岁</text>
         </view>
         <text class="desc">确诊 {{ catInfo.daysSinceDiagnosis }} 天 · 目标范围 {{ catInfo.targetMin }}~{{ catInfo.targetMax }}</text>
       </view>
@@ -109,15 +110,17 @@ import { onShow } from '@dcloudio/uni-app'
 import qiunDataCharts from 'ch-ucharts/components/qiun-data-charts/qiun-data-charts.vue'
 
 const catInfo = ref({
+  _id: '',
   avatar: '',
   name: '小煤球',
-  age: 6,
+  age: 0 as number | null,
   daysSinceDiagnosis: 0,
   targetMin: 5.0,
   targetMax: 15.0,
   thresholdNormalMax: 7.0,
   thresholdDangerMin: 15.0
 })
+const allCats = ref<any[]>([])
 
 const recentRecords = ref<any[]>([])
 const recentInsulins = ref<any[]>([])
@@ -158,9 +161,17 @@ const fetchCatProfile = async () => {
   try {
     // @ts-ignore
     const db = wx.cloud.database()
-    const res = await db.collection('cats').limit(1).get()
+    const res = await db.collection('cats').get()
       if (res.data && res.data.length > 0) {
-      const cat = res.data[0]
+      allCats.value = res.data
+      let currentCatId = uni.getStorageSync('currentCatId')
+      let cat = res.data.find((c: any) => c._id === currentCatId)
+      if (!cat) {
+        cat = res.data[0]
+        uni.setStorageSync('currentCatId', cat._id)
+      }
+      
+      catInfo.value._id = cat._id
       catInfo.value.name = cat.name || '小煤球'
       catInfo.value.avatar = cat.avatar || ''
       
@@ -173,6 +184,8 @@ const fetchCatProfile = async () => {
             ageNum--
         }
         catInfo.value.age = ageNum > 0 ? ageNum : 0
+      } else {
+        catInfo.value.age = null
       }
       
       if (cat.diagnosis_date) {
@@ -184,11 +197,16 @@ const fetchCatProfile = async () => {
       
       // Update chart targets if customized
       if (cat.targetMin && cat.targetMax) {
+        catInfo.value.targetMin = cat.targetMin
+        catInfo.value.targetMax = cat.targetMax
         chartOpts.value.extra.markLine.data = [
           { value: cat.targetMin, color: '#2ECC71' },
           { value: cat.targetMax, color: '#E74C3C' }
         ]
       }
+    } else {
+      catInfo.value._id = ''
+      allCats.value = []
     }
   } catch (err) {
     console.log('No customized cat profile found yet')
@@ -203,6 +221,7 @@ const fetchRecentRecords = async () => {
     // @ts-ignore
     const db = wx.cloud.database()
     const res = await db.collection('blood_glucose')
+      .where({ cat_id: catInfo.value._id || 'default' })
       .orderBy('createTime', 'desc')
       .limit(15)
       .get()
@@ -238,6 +257,7 @@ const fetchRecentInsulins = async () => {
     // @ts-ignore
     const db = wx.cloud.database()
     const res = await db.collection('insulin_records')
+      .where({ cat_id: catInfo.value._id || 'default' })
       .orderBy('createTime', 'desc')
       .limit(4)
       .get()
@@ -278,22 +298,43 @@ const formatDisplayTime = (date: Date) => {
   }
 }
 
+const loadAllData = async () => {
+  await fetchCatProfile()
+  if (catInfo.value._id || allCats.value.length === 0) {
+    fetchRecentRecords()
+    fetchRecentInsulins()
+  }
+}
+
 onShow(() => {
-  fetchCatProfile()
-  fetchRecentRecords()
-  fetchRecentInsulins()
+  loadAllData()
 })
 
-const handleLogGlucose = () => {
-  uni.navigateTo({
-    url: '/pages/log/index'
+const handleSwitchCat = () => {
+  const itemList = allCats.value.map(c => c.name || '未命名')
+  itemList.push('➕ 新增猫咪')
+  uni.showActionSheet({
+    itemList,
+    success: (res) => {
+      if (res.tapIndex === itemList.length - 1) {
+        uni.navigateTo({ url: '/pages/user/cat-profile/index' })
+      } else {
+        const selectedCat = allCats.value[res.tapIndex]
+        uni.setStorageSync('currentCatId', selectedCat._id)
+        loadAllData()
+      }
+    }
   })
 }
 
+const handleLogGlucose = () => {
+  if (allCats.value.length === 0) { uni.showToast({ title: '请先添加猫咪', icon: 'none' }); return }
+  uni.navigateTo({ url: '/pages/log/index' })
+}
+
 const handleLogInsulin = () => {
-  uni.navigateTo({
-    url: '/pages/log-insulin/index'
-  })
+  if (allCats.value.length === 0) { uni.showToast({ title: '请先添加猫咪', icon: 'none' }); return }
+  uni.navigateTo({ url: '/pages/log-insulin/index' })
 }
 
 const goToHistory = () => {
@@ -356,7 +397,10 @@ const getGlucoseClass = (val: number) => {
   font-size: 40rpx;
   font-weight: 700;
   color: var(--text-main);
-  margin-right: 16rpx;
+}
+.icon-switch {
+  width: 32rpx; height: 32rpx; margin-left: 8rpx; margin-right: 16rpx;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23BDC3C7' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 .tag {
   font-size: 20rpx;

@@ -111,9 +111,35 @@ const copyId = () => {
   }
 }
 
-const handleMenuClick = (menuName: string) => {
+const handleMenuClick = async (menuName: string) => {
   if (menuName === '猫咪档案') {
-    uni.navigateTo({ url: '/pages/user/cat-profile/index' })
+    // @ts-ignore
+    if (typeof wx === 'undefined' || !wx.cloud) return
+    uni.showLoading({ title: '加载中...' })
+    try {
+      // @ts-ignore
+      const db = wx.cloud.database()
+      const res = await db.collection('cats').get()
+      uni.hideLoading()
+      
+      const itemList = res.data.map((c: any) => '编辑：' + (c.name || '未命名'))
+      itemList.push('➕ 新增猫咪')
+      
+      uni.showActionSheet({
+        itemList,
+        success: (actionRes) => {
+          if (actionRes.tapIndex === itemList.length - 1) {
+            uni.navigateTo({ url: '/pages/user/cat-profile/index' })
+          } else {
+            const selectedCat = res.data[actionRes.tapIndex]
+            uni.navigateTo({ url: `/pages/user/cat-profile/index?id=${selectedCat._id}` })
+          }
+        }
+      })
+    } catch (e) {
+      uni.hideLoading()
+      uni.showToast({ title: '获取数据失败', icon: 'none' })
+    }
   } else if (menuName === '家庭共享') {
     uni.navigateTo({ url: '/pages/user/family/index' })
   } else if (menuName === '使用帮助' || menuName === '关于我们') {

@@ -84,7 +84,7 @@ const submitRecord = async () => {
       
       await db.collection('insulin_records').add({
         data: {
-          cat_id: 'default',
+          cat_id: uni.getStorageSync('currentCatId') || 'default',
           dose: numValue,
           insulin_type: insulinOptions[insulinIndex.value],
           inject_time: formData.value.time, 

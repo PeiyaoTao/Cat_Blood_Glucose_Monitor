@@ -84,7 +84,7 @@ const submitRecord = async () => {
       
       await db.collection('blood_glucose').add({
         data: {
-          cat_id: 'default', // 之后有了真实的猫咪档案后再替换
+          cat_id: uni.getStorageSync('currentCatId') || 'default',
           bg_value: parseFloat(formData.value.bg_value),
           status: statusOptions[statusIndex.value],
           measure_time: formData.value.time, 

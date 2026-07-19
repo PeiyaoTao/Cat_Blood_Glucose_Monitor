@@ -12,15 +12,18 @@ exports.main = async (event, context) => {
   const days = event.days || 30 // 默认 30 天，如果是 0 代表全部
   
   let timeQuery = {}
+  const catId = event.catId || 'default'
+  
   if (days > 0) {
     const pastDate = new Date()
     pastDate.setDate(pastDate.getDate() - days)
     timeQuery = {
       _openid: openid,
+      cat_id: catId,
       createTime: db.command.gte(pastDate)
     }
   } else {
-    timeQuery = { _openid: openid }
+    timeQuery = { _openid: openid, cat_id: catId }
   }
 
   try {
