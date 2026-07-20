@@ -28,12 +28,6 @@
         </picker>
       </view>
 
-      <view class="form-group">
-        <text class="label">体重 (kg)</text>
-        <view class="input-wrap">
-          <input type="digit" v-model="formData.weight" placeholder="请输入当前体重" />
-        </view>
-      </view>
 
       <view class="form-group">
         <text class="label">确诊日期</text>
@@ -63,6 +57,9 @@
     <button class="btn btn-primary submit-btn" :loading="isSubmitting" @click="saveProfile">
       保存档案
     </button>
+    <button v-if="docId" class="btn btn-danger delete-btn" @click="handleDelete">
+      {{ isCreator ? '删除档案' : '解除共享绑定' }}
+    </button>
   </view>
 </template>
 
@@ -72,12 +69,13 @@ import { onLoad } from '@dcloudio/uni-app'
 
 const isSubmitting = ref(false)
 const docId = ref('')
+const isCreator = ref(true)
+const catOpenId = ref('')
 
 const formData = ref({
   avatar: '',
   name: '',
   birthday: '',
-  weight: '',
   diagnosis_date: '',
   targetMin: 5.0,
   targetMax: 15.0
@@ -94,11 +92,17 @@ onLoad(async (options: any) => {
         if (res.data) {
           const cat = res.data
           docId.value = cat._id
+          catOpenId.value = cat._openid || ''
+          
+          const userInfoStr = uni.getStorageSync('userInfo')
+          const userInfo = userInfoStr ? JSON.parse(userInfoStr) : null
+          const myOpenid = userInfo ? userInfo.openid : ''
+          isCreator.value = !cat._openid || cat._openid === myOpenid
+
           formData.value = {
             avatar: cat.avatar || '',
             name: cat.name || '',
             birthday: cat.birthday || '',
-            weight: cat.weight || '',
             diagnosis_date: cat.diagnosis_date || '',
             targetMin: cat.targetMin || 5.0,
             targetMax: cat.targetMax || 15.0
@@ -172,7 +176,6 @@ const saveProfile = async () => {
         avatar: formData.value.avatar,
         name: formData.value.name,
         birthday: formData.value.birthday,
-        weight: parseFloat(formData.value.weight),
         diagnosis_date: formData.value.diagnosis_date,
         targetMin: parseFloat(formData.value.targetMin as any),
         targetMax: parseFloat(formData.value.targetMax as any),
@@ -202,6 +205,41 @@ const saveProfile = async () => {
   } finally {
     isSubmitting.value = false
   }
+}
+
+const handleDelete = () => {
+  const title = isCreator.value ? '删除档案' : '解除绑定'
+  const content = isCreator.value ? '确定要永久删除该猫咪的所有资料吗？该操作不可恢复！' : '确定要解除对该共享猫咪的绑定吗？'
+  
+  uni.showModal({
+    title,
+    content,
+    confirmColor: '#E74C3C',
+    success: async (res) => {
+      if (res.confirm) {
+        uni.showLoading({ title: '处理中...' })
+        try {
+          // @ts-ignore
+          const db = wx.cloud.database()
+          if (isCreator.value) {
+            await db.collection('cats').doc(docId.value).remove()
+          } else {
+            let boundInviters = uni.getStorageSync('boundInviters') || []
+            boundInviters = boundInviters.filter((id: string) => id !== catOpenId.value)
+            uni.setStorageSync('boundInviters', boundInviters)
+          }
+          
+          uni.removeStorageSync('currentCatId')
+          uni.showToast({ title: '已移除', icon: 'success' })
+          setTimeout(() => { uni.navigateBack() }, 1500)
+        } catch (e) {
+          uni.showToast({ title: '操作失败', icon: 'none' })
+        } finally {
+          uni.hideLoading()
+        }
+      }
+    }
+  })
 }
 </script>
 
@@ -308,5 +346,11 @@ const saveProfile = async () => {
 }
 .submit-btn {
   margin-top: 60rpx;
+}
+.delete-btn {
+  margin-top: 32rpx;
+  background-color: transparent;
+  color: var(--danger-red);
+  border: 2rpx solid var(--danger-red);
 }
 </style>

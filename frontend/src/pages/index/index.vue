@@ -26,13 +26,19 @@
         <button class="btn btn-secondary log-btn" @click="handleLogInsulin">
           <view class="icon-svg icon-syringe"></view> 记打针
         </button>
+        <button class="btn btn-secondary log-btn" style="background-color: #E8F8F5; color: #1ABC9C;" @click="handleLogWeight">
+          <view class="icon-svg icon-weight-sm"></view> 记体重
+        </button>
       </view>
     </view>
 
     <!-- 图表展示 -->
     <view class="chart-card card">
       <view class="card-header">
-        <text class="title">近期血糖曲线</text>
+        <view class="tabs">
+          <text class="tab-item" :class="{ active: currentChartTab === 'glucose' }" @click="switchTab('glucose')">近期血糖</text>
+          <text class="tab-item" :class="{ active: currentChartTab === 'weight' }" @click="switchTab('weight')">近期体重</text>
+        </view>
       </view>
       <view class="chart-placeholder">
         <qiun-data-charts 
@@ -106,8 +112,18 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onShow, onLoad } from '@dcloudio/uni-app'
 import qiunDataCharts from 'ch-ucharts/components/qiun-data-charts/qiun-data-charts.vue'
+
+onLoad((options: any) => {
+  if (options && options.inviter) {
+    let boundInviters = uni.getStorageSync('boundInviters') || []
+    if (!boundInviters.includes(options.inviter)) {
+      boundInviters.push(options.inviter)
+      uni.setStorageSync('boundInviters', boundInviters)
+    }
+  }
+})
 
 const catInfo = ref({
   _id: '',
@@ -122,8 +138,11 @@ const catInfo = ref({
 })
 const allCats = ref<any[]>([])
 
+const currentChartTab = ref('glucose')
 const recentRecords = ref<any[]>([])
 const recentInsulins = ref<any[]>([])
+let rawGlucoseData: any[] = []
+let rawWeightData: any[] = []
 const chartData = ref({})
 const chartOpts = ref({
   color: ["#F39C12"],
@@ -161,7 +180,18 @@ const fetchCatProfile = async () => {
   try {
     // @ts-ignore
     const db = wx.cloud.database()
-    const res = await db.collection('cats').get()
+    const _ = db.command
+    let boundInviters = uni.getStorageSync('boundInviters') || []
+    
+    let queryCond: any = { _openid: '{openid}' }
+    if (boundInviters.length > 0) {
+      queryCond = _.or([
+        { _openid: '{openid}' },
+        { _openid: _.in(boundInviters) }
+      ])
+    }
+    
+    const res = await db.collection('cats').where(queryCond).get()
       if (res.data && res.data.length > 0) {
       allCats.value = res.data
       let currentCatId = uni.getStorageSync('currentCatId')
@@ -233,20 +263,74 @@ const fetchRecentRecords = async () => {
         value: item.bg_value
       }))
       
-      const chartItems = [...res.data].reverse()
-      const categories = chartItems.map(item => {
-        const d = new Date(item.createTime)
-        return `${d.getMonth()+1}/${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
-      })
-      const dataPoints = chartItems.map(item => item.bg_value)
-      
-      chartData.value = {
-        categories,
-        series: [{ name: "血糖值", data: dataPoints }]
-      }
+      rawGlucoseData = res.data
+      if (currentChartTab.value === 'glucose') renderChart()
     }
   } catch (err) {
     console.error('获取最近记录失败', err)
+  }
+}
+
+const fetchRecentWeights = async () => {
+  // @ts-ignore
+  if (typeof wx === 'undefined' || !wx.cloud) return
+  try {
+    // @ts-ignore
+    const db = wx.cloud.database()
+    const res = await db.collection('weight_records')
+      .where({ cat_id: catInfo.value._id || 'default' })
+      .orderBy('createTime', 'desc')
+      .limit(15)
+      .get()
+      
+    if (res.data) {
+      rawWeightData = res.data
+      if (currentChartTab.value === 'weight') renderChart()
+    }
+  } catch (err) {
+    console.error('获取体重记录失败', err)
+  }
+}
+
+const switchTab = (tab: string) => {
+  currentChartTab.value = tab
+  renderChart()
+}
+
+const renderChart = () => {
+  if (currentChartTab.value === 'glucose') {
+    const chartItems = [...rawGlucoseData].reverse()
+    const categories = chartItems.map(item => {
+      const d = new Date(item.createTime)
+      return `${d.getMonth()+1}/${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
+    })
+    const dataPoints = chartItems.map(item => item.bg_value)
+    
+    chartData.value = {
+      categories,
+      series: [{ name: "血糖值", data: dataPoints }]
+    }
+    chartOpts.value.yAxis.data = [{ min: 0, max: 30 }]
+    chartOpts.value.extra.markLine.data = [
+      { value: catInfo.value.targetMin, color: '#2ECC71' },
+      { value: catInfo.value.targetMax, color: '#E74C3C' }
+    ]
+  } else {
+    const chartItems = [...rawWeightData].reverse()
+    const categories = chartItems.map(item => {
+      const d = new Date(item.record_date || item.createTime)
+      return `${d.getMonth()+1}/${d.getDate()}`
+    })
+    const dataPoints = chartItems.map(item => item.weight_value)
+    
+    chartData.value = {
+      categories,
+      series: [{ name: "体重(kg)", data: dataPoints }]
+    }
+    const minW = dataPoints.length ? Math.floor(Math.min(...dataPoints) - 1) : 0
+    const maxW = dataPoints.length ? Math.ceil(Math.max(...dataPoints) + 1) : 10
+    chartOpts.value.yAxis.data = [{ min: minW > 0 ? minW : 0, max: maxW }]
+    chartOpts.value.extra.markLine.data = []
   }
 }
 
@@ -303,6 +387,7 @@ const loadAllData = async () => {
   if (catInfo.value._id || allCats.value.length === 0) {
     fetchRecentRecords()
     fetchRecentInsulins()
+    fetchRecentWeights()
   }
 }
 
@@ -335,6 +420,11 @@ const handleLogGlucose = () => {
 const handleLogInsulin = () => {
   if (allCats.value.length === 0) { uni.showToast({ title: '请先添加猫咪', icon: 'none' }); return }
   uni.navigateTo({ url: '/pages/log-insulin/index' })
+}
+
+const handleLogWeight = () => {
+  if (allCats.value.length === 0) { uni.showToast({ title: '请先添加猫咪', icon: 'none' }); return }
+  uni.navigateTo({ url: '/pages/log-weight/index' })
 }
 
 const goToHistory = () => {
@@ -427,6 +517,22 @@ const getGlucoseClass = (val: number) => {
   font-weight: 700;
   color: var(--text-main);
 }
+.tabs {
+  display: flex;
+  gap: 32rpx;
+}
+.tab-item {
+  font-size: 32rpx;
+  font-weight: 700;
+  color: var(--text-sub);
+  padding-bottom: 8rpx;
+  border-bottom: 4rpx solid transparent;
+  transition: all 0.3s;
+}
+.tab-item.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
 .more {
   font-size: 24rpx;
   color: var(--text-sub);
@@ -439,20 +545,22 @@ const getGlucoseClass = (val: number) => {
 .btn-group {
   display: flex;
   justify-content: space-between;
-  gap: 24rpx;
+  gap: 16rpx;
 }
 .log-btn {
   flex: 1;
-  height: 96rpx;
+  height: 88rpx;
   margin: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  font-size: 26rpx;
+  padding: 0;
 }
 .icon-svg {
-  width: 40rpx;
-  height: 40rpx;
-  margin-right: 12rpx;
+  width: 32rpx;
+  height: 32rpx;
+  margin-right: 8rpx;
   background-size: contain;
   background-repeat: no-repeat;
   background-position: center;
@@ -462,6 +570,9 @@ const getGlucoseClass = (val: number) => {
 }
 .icon-syringe {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23FF8A65' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m18 2 4 4'/%3E%3Cpath d='m17 7 3-3'/%3E%3Cpath d='M19 9 8.7 19.3c-1 1-2.5 1-3.4 0l-.6-.6c-1-1-1-2.5 0-3.4L15 5'/%3E%3Cpath d='m9 11 4 4'/%3E%3Cpath d='m5 19-3 3'/%3E%3Cpath d='m14 4 6 6'/%3E%3C/svg%3E");
+}
+.icon-weight-sm {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231ABC9C' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z'/%3E%3Cline x1='7' y1='7' x2='7.01' y2='7'/%3E%3C/svg%3E");
 }
 
 /* 图表占位 */
