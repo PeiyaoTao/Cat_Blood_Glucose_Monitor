@@ -65,11 +65,52 @@ exports.main = async (event, context) => {
         return { success: true }
       }
 
+      case 'removeFamilyMember': {
+        const { targetOpenid } = payload
+        if (!targetOpenid) throw new Error('Missing targetOpenid')
+        if (targetOpenid === openid) throw new Error('Cannot remove yourself this way')
+
+        // Find all cats created by the CURRENT user
+        const { data: myCats } = await db.collection('cats').where({
+          _openid: openid
+        }).get()
+
+        let modified = 0
+        for (let cat of myCats) {
+          if (cat.shared_with && cat.shared_with.includes(targetOpenid)) {
+            await db.collection('cats').doc(cat._id).update({
+              data: {
+                shared_with: _.pull(targetOpenid)
+              }
+            })
+            modified++
+          }
+        }
+        return { success: true, modified }
+      }
+
       case 'getCats': {
         const { data } = await db.collection('cats').where(_.or([
           { _openid: openid },
           { shared_with: openid }
         ])).get()
+        
+        const fileList = data.map(c => c.avatar).filter(url => url && url.startsWith('cloud://'))
+        if (fileList.length > 0) {
+          try {
+            const res = await cloud.getTempFileURL({ fileList })
+            const urlMap = {}
+            res.fileList.forEach(f => { urlMap[f.fileID] = f.tempFileURL })
+            data.forEach(c => {
+              if (c.avatar && urlMap[c.avatar]) {
+                c.avatar = urlMap[c.avatar]
+              }
+            })
+          } catch(e) {
+            console.error('Failed to get temp URLs for cats', e)
+          }
+        }
+        
         return { success: true, data }
       }
 
@@ -144,6 +185,52 @@ exports.main = async (event, context) => {
         
         await db.collection(collectionName).doc(recordId).remove()
         return { success: true }
+      }
+
+      case 'saveUser': {
+        const { nickName, avatarUrl } = payload
+        const { data } = await db.collection('users').where({ _openid: openid }).get()
+        if (data && data.length > 0) {
+          await db.collection('users').doc(data[0]._id).update({
+            data: { nickName, avatarUrl, updateTime: Date.now() }
+          })
+        } else {
+          await db.collection('users').add({
+            data: { _openid: openid, nickName, avatarUrl, createTime: Date.now(), updateTime: Date.now() }
+          })
+        }
+        return { success: true }
+      }
+
+      case 'getUsers': {
+        const { openids } = payload
+        if (!openids || !Array.isArray(openids)) {
+          throw new Error('Missing or invalid openids array')
+        }
+        const MAX_LIMIT = 20
+        const queryOpenids = openids.slice(0, MAX_LIMIT)
+        
+        const { data } = await db.collection('users').where({
+          _openid: _.in(queryOpenids)
+        }).get()
+        
+        const fileList = data.map(u => u.avatarUrl).filter(url => url && url.startsWith('cloud://'))
+        if (fileList.length > 0) {
+          try {
+            const res = await cloud.getTempFileURL({ fileList })
+            const urlMap = {}
+            res.fileList.forEach(f => { urlMap[f.fileID] = f.tempFileURL })
+            data.forEach(u => {
+              if (u.avatarUrl && urlMap[u.avatarUrl]) {
+                u.avatarUrl = urlMap[u.avatarUrl]
+              }
+            })
+          } catch(e) {
+            console.error('Failed to get temp URLs for users', e)
+          }
+        }
+        
+        return { success: true, data }
       }
 
       default:

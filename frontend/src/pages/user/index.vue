@@ -88,9 +88,35 @@ const login = async () => {
   }
 }
 
-const onChooseAvatar = (e: any) => {
-  userInfo.value.avatarUrl = e.detail.avatarUrl
-  saveUserInfo()
+const onChooseAvatar = async (e: any) => {
+  const tempPath = e.detail.avatarUrl
+  // 先在本地显示
+  userInfo.value.avatarUrl = tempPath
+  
+  // @ts-ignore
+  if (typeof wx !== 'undefined' && wx.cloud && userInfo.value.openid) {
+    uni.showLoading({ title: '上传头像中...' })
+    try {
+      const ext = tempPath.match(/\.([^\.]+)$/)?.[1] || 'png'
+      const cloudPath = `avatars/${userInfo.value.openid}_${Date.now()}.${ext}`
+      // @ts-ignore
+      const uploadRes = await wx.cloud.uploadFile({
+        cloudPath: cloudPath,
+        filePath: tempPath
+      })
+      if (uploadRes.fileID) {
+        userInfo.value.avatarUrl = uploadRes.fileID
+      }
+    } catch (err) {
+      console.error('Upload avatar failed', err)
+      uni.showToast({ title: '头像同步失败', icon: 'none' })
+    } finally {
+      uni.hideLoading()
+      saveUserInfo()
+    }
+  } else {
+    saveUserInfo()
+  }
 }
 
 const onNicknameBlur = (e: any) => {
@@ -102,8 +128,18 @@ const onNicknameChange = (e: any) => {
   saveUserInfo()
 }
 
-const saveUserInfo = () => {
+const saveUserInfo = async () => {
   uni.setStorageSync('userInfo', JSON.stringify(userInfo.value))
+  try {
+    if (userInfo.value.openid) {
+      await callApi('saveUser', {
+        nickName: userInfo.value.nickName,
+        avatarUrl: userInfo.value.avatarUrl
+      })
+    }
+  } catch (e) {
+    console.error('Failed to sync user info to cloud', e)
+  }
 }
 
 const copyId = () => {

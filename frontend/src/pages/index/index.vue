@@ -6,7 +6,7 @@
         <image class="avatar" :src="catInfo.avatar || 'https://api.dicebear.com/7.x/notionists/svg?seed=Felix&backgroundColor=FFDAB9'" mode="aspectFill"></image>
       </view>
       <view class="info">
-        <text class="greeting">早安，主人</text>
+        <text class="greeting">{{ greetingText }}</text>
         <view class="name-row" @click="handleSwitchCat">
           <text class="name">{{ catInfo.name || '未命名' }}</text>
           <view class="icon-svg icon-switch"></view>
@@ -111,7 +111,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { onShow, onLoad, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
 import qiunDataCharts from 'ch-ucharts/components/qiun-data-charts/qiun-data-charts.vue'
 import { callApi } from '@/utils/api'
@@ -165,6 +165,13 @@ const catInfo = ref({
   thresholdDangerMin: 15.0
 })
 const allCats = ref<any[]>([])
+
+const greetingText = computed(() => {
+  const hour = new Date().getHours()
+  if (hour < 12) return '早上好，铲屎官'
+  if (hour < 18) return '下午好，铲屎官'
+  return '晚上好，铲屎官'
+})
 
 const currentChartTab = ref('glucose')
 const recentRecords = ref<any[]>([])
