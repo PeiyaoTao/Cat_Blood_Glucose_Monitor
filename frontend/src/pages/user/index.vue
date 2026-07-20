@@ -47,7 +47,8 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
+import { callApi } from '@/utils/api'
 
 const userInfo = ref({
   avatarUrl: '',
@@ -116,15 +117,25 @@ const copyId = () => {
   }
 }
 
+onShareAppMessage(() => {
+  return {
+    title: '猫咪血糖监测日记',
+    path: userInfo.value.openid ? `/pages/index/index?inviter=${userInfo.value.openid}` : '/pages/index/index'
+  }
+})
+
+onShareTimeline(() => {
+  return {
+    title: '猫咪血糖监测日记',
+    query: userInfo.value.openid ? `inviter=${userInfo.value.openid}` : ''
+  }
+})
+
 const handleMenuClick = async (menuName: string) => {
   if (menuName === '猫咪档案') {
-    // @ts-ignore
-    if (typeof wx === 'undefined' || !wx.cloud) return
     uni.showLoading({ title: '加载中...' })
     try {
-      // @ts-ignore
-      const db = wx.cloud.database()
-      const res = await db.collection('cats').get()
+      const res = await callApi('getCats')
       uni.hideLoading()
       
       const itemList = res.data.map((c: any) => '编辑：' + (c.name || '未命名'))

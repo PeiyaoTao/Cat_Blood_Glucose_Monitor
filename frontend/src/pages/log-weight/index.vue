@@ -30,6 +30,16 @@
         </picker>
       </view>
 
+      <view class="input-group">
+        <text class="label">称重时间</text>
+        <picker mode="time" :value="recordTime" @change="onTimeChange">
+          <view class="picker-view">
+            {{ recordTime || '请选择时间' }}
+            <text class="arrow">▼</text>
+          </view>
+        </picker>
+      </view>
+
       <button class="btn btn-primary submit-btn" :loading="isSubmitting" @click="submitLog">
         保存记录
       </button>
@@ -39,18 +49,22 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { callApi } from '@/utils/api'
 
 const weightValue = ref('')
 const isSubmitting = ref(false)
 
-// 默认日期为今天
 const today = new Date()
 const pad = (n: number) => n.toString().padStart(2, '0')
 const recordDate = ref(`${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`)
+const recordTime = ref(`${pad(today.getHours())}:${pad(today.getMinutes())}`)
 
 const onDateChange = (e: any) => {
   recordDate.value = e.detail.value
+}
+
+const onTimeChange = (e: any) => {
+  recordTime.value = e.detail.value
 }
 
 const submitLog = async () => {
@@ -61,18 +75,15 @@ const submitLog = async () => {
 
   isSubmitting.value = true
   try {
-    const currentCatId = uni.getStorageSync('currentCatId')
-    // @ts-ignore
-    const db = wx.cloud.database()
+    const recordData = {
+      cat_id: uni.getStorageSync('currentCatId') || 'default',
+      weight_value: parseFloat(weightValue.value),
+      record_date: recordDate.value,
+      measure_time: recordTime.value,
+      createTime: Date.now()
+    }
     
-    await db.collection('weight_records').add({
-      data: {
-        cat_id: currentCatId,
-        weight_value: parseFloat(weightValue.value),
-        record_date: recordDate.value,
-        createTime: db.serverDate()
-      }
-    })
+    await callApi('addRecord', { type: 'weight_records', recordData })
     
     uni.showToast({ title: '记录成功', icon: 'success' })
     setTimeout(() => {
@@ -81,7 +92,7 @@ const submitLog = async () => {
   } catch (err: any) {
     console.error(err)
     if (err.message && err.message.includes('not exist')) {
-      uni.showToast({ title: '请先在云端创建 weight_records 集合！', icon: 'none', duration: 4000 })
+      uni.showToast({ title: '请先在云端创建集合！', icon: 'none', duration: 4000 })
     } else {
       uni.showToast({ title: '记录失败', icon: 'none' })
     }

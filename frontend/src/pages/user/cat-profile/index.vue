@@ -66,6 +66,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
+import { callApi } from '@/utils/api'
 
 const isSubmitting = ref(false)
 const docId = ref('')
@@ -82,15 +83,12 @@ const formData = ref({
 })
 
 onLoad(async (options: any) => {
-  // @ts-ignore
-  if (typeof wx !== 'undefined' && wx.cloud) {
+  if (options && options.id) {
     try {
-      // @ts-ignore
-      const db = wx.cloud.database()
-      if (options && options.id) {
-        const res = await db.collection('cats').doc(options.id).get()
-        if (res.data) {
-          const cat = res.data
+      const res = await callApi('getCats')
+      if (res.data) {
+        const cat = res.data.find((c: any) => c._id === options.id)
+        if (cat) {
           docId.value = cat._id
           catOpenId.value = cat._openid || ''
           
@@ -138,7 +136,6 @@ const handleAvatarClick = () => {
 }
 
 const onChooseAvatar = (e: any) => {
-  // 兼容最新的头像选择器(获取微信头像), 顺便也可以用作猫咪头像(虽然很少见)
   const { avatarUrl } = e.detail
   uploadAvatar(avatarUrl)
 }
@@ -168,37 +165,28 @@ const saveProfile = async () => {
   
   isSubmitting.value = true
   try {
-    // @ts-ignore
-    if (typeof wx !== 'undefined' && wx.cloud) {
-      // @ts-ignore
-      const db = wx.cloud.database()
-      const dataToSave = {
-        avatar: formData.value.avatar,
-        name: formData.value.name,
-        birthday: formData.value.birthday,
-        diagnosis_date: formData.value.diagnosis_date,
-        targetMin: parseFloat(formData.value.targetMin as any),
-        targetMax: parseFloat(formData.value.targetMax as any),
-        updateTime: db.serverDate()
-      }
-      
-      if (docId.value) {
-        // 更新记录
-        await db.collection('cats').doc(docId.value).update({ data: dataToSave })
-      } else {
-        // 新建记录
-        const res = await db.collection('cats').add({ data: dataToSave })
-        docId.value = res._id
-        uni.setStorageSync('currentCatId', res._id)
-      }
-      
-      uni.showToast({ title: '保存成功', icon: 'success' })
-      setTimeout(() => { uni.navigateBack() }, 1500)
+    const dataToSave = {
+      avatar: formData.value.avatar,
+      name: formData.value.name,
+      birthday: formData.value.birthday,
+      diagnosis_date: formData.value.diagnosis_date,
+      targetMin: parseFloat(formData.value.targetMin as any),
+      targetMax: parseFloat(formData.value.targetMax as any),
+      updateTime: Date.now()
     }
+    
+    const res = await callApi('saveCat', { catId: docId.value, catData: dataToSave })
+    if (!docId.value) {
+      docId.value = res.id
+      uni.setStorageSync('currentCatId', res.id)
+    }
+    
+    uni.showToast({ title: '保存成功', icon: 'success' })
+    setTimeout(() => { uni.navigateBack() }, 1500)
   } catch (err: any) {
     console.error(err)
     if (err.message && err.message.includes('not exist')) {
-      uni.showToast({ title: '请先在云开发控制台创建 cats 集合！', icon: 'none', duration: 4000 })
+      uni.showToast({ title: '请先在云开发控制台创建集合！', icon: 'none', duration: 4000 })
     } else {
       uni.showToast({ title: '保存失败', icon: 'none' })
     }
@@ -219,14 +207,10 @@ const handleDelete = () => {
       if (res.confirm) {
         uni.showLoading({ title: '处理中...' })
         try {
-          // @ts-ignore
-          const db = wx.cloud.database()
           if (isCreator.value) {
-            await db.collection('cats').doc(docId.value).remove()
+            await callApi('deleteCat', { catId: docId.value })
           } else {
-            let boundInviters = uni.getStorageSync('boundInviters') || []
-            boundInviters = boundInviters.filter((id: string) => id !== catOpenId.value)
-            uni.setStorageSync('boundInviters', boundInviters)
+            await callApi('unbindSharedCat', { catId: docId.value })
           }
           
           uni.removeStorageSync('currentCatId')

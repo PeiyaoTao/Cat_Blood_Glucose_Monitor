@@ -112,16 +112,44 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { onShow, onLoad } from '@dcloudio/uni-app'
+import { onShow, onLoad, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
 import qiunDataCharts from 'ch-ucharts/components/qiun-data-charts/qiun-data-charts.vue'
+import { callApi } from '@/utils/api'
 
-onLoad((options: any) => {
+onLoad(async (options: any) => {
   if (options && options.inviter) {
-    let boundInviters = uni.getStorageSync('boundInviters') || []
-    if (!boundInviters.includes(options.inviter)) {
-      boundInviters.push(options.inviter)
-      uni.setStorageSync('boundInviters', boundInviters)
+    try {
+      await callApi('bindSharedCat', { inviter: options.inviter })
+      uni.showToast({ title: '已加入家庭共享', icon: 'success' })
+    } catch (e) {
+      console.log('绑定家庭共享失败', e)
     }
+  }
+})
+
+onShareAppMessage(() => {
+  const userInfoStr = uni.getStorageSync('userInfo')
+  let openid = ''
+  if (userInfoStr) {
+    openid = JSON.parse(userInfoStr).openid || ''
+  }
+  
+  return {
+    title: '猫咪血糖监测日记',
+    path: openid ? `/pages/index/index?inviter=${openid}` : '/pages/index/index'
+  }
+})
+
+onShareTimeline(() => {
+  const userInfoStr = uni.getStorageSync('userInfo')
+  let openid = ''
+  if (userInfoStr) {
+    openid = JSON.parse(userInfoStr).openid || ''
+  }
+  
+  return {
+    title: '猫咪血糖监测日记',
+    query: openid ? `inviter=${openid}` : ''
   }
 })
 
@@ -166,33 +194,15 @@ const chartOpts = ref({
     markLine: {
       type: 'solid',
       dashLength: 4,
-      data: [
-        { value: catInfo.value.thresholdNormalMax, color: '#2ECC71' },
-        { value: catInfo.value.thresholdDangerMin, color: '#E74C3C' }
-      ]
+      data: []
     }
   }
 })
 
 const fetchCatProfile = async () => {
-  // @ts-ignore
-  if (typeof wx === 'undefined' || !wx.cloud) return
   try {
-    // @ts-ignore
-    const db = wx.cloud.database()
-    const _ = db.command
-    let boundInviters = uni.getStorageSync('boundInviters') || []
-    
-    let queryCond: any = { _openid: '{openid}' }
-    if (boundInviters.length > 0) {
-      queryCond = _.or([
-        { _openid: '{openid}' },
-        { _openid: _.in(boundInviters) }
-      ])
-    }
-    
-    const res = await db.collection('cats').where(queryCond).get()
-      if (res.data && res.data.length > 0) {
+    const res = await callApi('getCats')
+    if (res.data && res.data.length > 0) {
       allCats.value = res.data
       let currentCatId = uni.getStorageSync('currentCatId')
       let cat = res.data.find((c: any) => c._id === currentCatId)
@@ -202,7 +212,7 @@ const fetchCatProfile = async () => {
       }
       
       catInfo.value._id = cat._id
-      catInfo.value.name = cat.name || '小煤球'
+      catInfo.value.name = cat.name || '未命名'
       catInfo.value.avatar = cat.avatar || ''
       
       if (cat.birthday) {
@@ -225,44 +235,29 @@ const fetchCatProfile = async () => {
         catInfo.value.daysSinceDiagnosis = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
       }
       
-      // Update chart targets if customized
       if (cat.targetMin && cat.targetMax) {
         catInfo.value.targetMin = cat.targetMin
         catInfo.value.targetMax = cat.targetMax
-        chartOpts.value.extra.markLine.data = [
-          { value: cat.targetMin, color: '#2ECC71' },
-          { value: cat.targetMax, color: '#E74C3C' }
-        ]
       }
     } else {
       catInfo.value._id = ''
       allCats.value = []
     }
   } catch (err) {
-    console.log('No customized cat profile found yet')
+    console.log('Error fetching cats via API', err)
   }
 }
 
 const fetchRecentRecords = async () => {
-  // @ts-ignore
-  if (typeof wx === 'undefined' || !wx.cloud) return
-  
+  if (!catInfo.value._id) return
   try {
-    // @ts-ignore
-    const db = wx.cloud.database()
-    const res = await db.collection('blood_glucose')
-      .where({ cat_id: catInfo.value._id || 'default' })
-      .orderBy('createTime', 'desc')
-      .limit(15)
-      .get()
-      
+    const res = await callApi('getRecords', { catId: catInfo.value._id, type: 'blood_glucose', limit: 15 })
     if (res.data) {
       recentRecords.value = res.data.slice(0, 4).map((item: any) => ({
         time: formatDisplayTime(item.createTime),
         status: item.status,
         value: item.bg_value
       }))
-      
       rawGlucoseData = res.data
       if (currentChartTab.value === 'glucose') renderChart()
     }
@@ -272,17 +267,9 @@ const fetchRecentRecords = async () => {
 }
 
 const fetchRecentWeights = async () => {
-  // @ts-ignore
-  if (typeof wx === 'undefined' || !wx.cloud) return
+  if (!catInfo.value._id) return
   try {
-    // @ts-ignore
-    const db = wx.cloud.database()
-    const res = await db.collection('weight_records')
-      .where({ cat_id: catInfo.value._id || 'default' })
-      .orderBy('createTime', 'desc')
-      .limit(15)
-      .get()
-      
+    const res = await callApi('getRecords', { catId: catInfo.value._id, type: 'weight_records', limit: 15 })
     if (res.data) {
       rawWeightData = res.data
       if (currentChartTab.value === 'weight') renderChart()
@@ -298,6 +285,10 @@ const switchTab = (tab: string) => {
 }
 
 const renderChart = () => {
+  // 必须深拷贝，否则 qiun-data-charts 组件不会监听到数据更新
+  let newChartData = { categories: [] as string[], series: [] as any[] }
+  let newOpts = JSON.parse(JSON.stringify(chartOpts.value))
+
   if (currentChartTab.value === 'glucose') {
     const chartItems = [...rawGlucoseData].reverse()
     const categories = chartItems.map(item => {
@@ -306,12 +297,12 @@ const renderChart = () => {
     })
     const dataPoints = chartItems.map(item => item.bg_value)
     
-    chartData.value = {
+    newChartData = {
       categories,
       series: [{ name: "血糖值", data: dataPoints }]
     }
-    chartOpts.value.yAxis.data = [{ min: 0, max: 30 }]
-    chartOpts.value.extra.markLine.data = [
+    newOpts.yAxis.data = [{ min: 0, max: 30 }]
+    newOpts.extra.markLine.data = [
       { value: catInfo.value.targetMin, color: '#2ECC71' },
       { value: catInfo.value.targetMax, color: '#E74C3C' }
     ]
@@ -319,33 +310,29 @@ const renderChart = () => {
     const chartItems = [...rawWeightData].reverse()
     const categories = chartItems.map(item => {
       const d = new Date(item.record_date || item.createTime)
-      return `${d.getMonth()+1}/${d.getDate()}`
+      const timeStr = item.measure_time ? ` ${item.measure_time}` : ''
+      return `${d.getMonth()+1}/${d.getDate()}${timeStr}`
     })
     const dataPoints = chartItems.map(item => item.weight_value)
     
-    chartData.value = {
+    newChartData = {
       categories,
       series: [{ name: "体重(kg)", data: dataPoints }]
     }
     const minW = dataPoints.length ? Math.floor(Math.min(...dataPoints) - 1) : 0
     const maxW = dataPoints.length ? Math.ceil(Math.max(...dataPoints) + 1) : 10
-    chartOpts.value.yAxis.data = [{ min: minW > 0 ? minW : 0, max: maxW }]
-    chartOpts.value.extra.markLine.data = []
+    newOpts.yAxis.data = [{ min: minW > 0 ? minW : 0, max: maxW }]
+    newOpts.extra.markLine.data = []
   }
+
+  chartData.value = JSON.parse(JSON.stringify(newChartData))
+  chartOpts.value = newOpts
 }
 
 const fetchRecentInsulins = async () => {
-  // @ts-ignore
-  if (typeof wx === 'undefined' || !wx.cloud) return
+  if (!catInfo.value._id) return
   try {
-    // @ts-ignore
-    const db = wx.cloud.database()
-    const res = await db.collection('insulin_records')
-      .where({ cat_id: catInfo.value._id || 'default' })
-      .orderBy('createTime', 'desc')
-      .limit(4)
-      .get()
-      
+    const res = await callApi('getRecords', { catId: catInfo.value._id, type: 'insulin_records', limit: 4 })
     if (res.data) {
       recentInsulins.value = res.data.map((item: any) => {
         let displayTime = item.inject_time
@@ -432,10 +419,6 @@ const goToHistory = () => {
 }
 
 const getGlucoseClass = (val: number) => {
-  // 根据 T/CVMA 195—2024 标准：
-  // 正常猫咪血糖应 <= 7.0 mmol/L
-  // > 7.0 且 < 15.0 属于临界升高 (5.1.2 e)
-  // >= 15.0 属于高血糖确诊指标 (5.1.2 d)
   if (val >= catInfo.value.thresholdDangerMin) {
     return 'text-danger' // 红色：>= 15.0 高危
   } else if (val > catInfo.value.thresholdNormalMax) {

@@ -4,6 +4,7 @@
     <view class="tabs">
       <view class="tab-item" :class="{ active: currentTab === 0 }" @click="switchTab(0)">血糖记录</view>
       <view class="tab-item" :class="{ active: currentTab === 1 }" @click="switchTab(1)">打针记录</view>
+      <view class="tab-item" :class="{ active: currentTab === 2 }" @click="switchTab(2)">体重记录</view>
     </view>
 
     <!-- 列表区 -->
@@ -14,10 +15,10 @@
           <view class="card-left">
             <view class="date-time">
               <text class="date">{{ formatDate(item.createTime) }}</text>
-              <text class="time">{{ currentTab === 0 ? item.measure_time : item.inject_time }}</text>
+              <text class="time">{{ currentTab === 0 ? item.measure_time : (currentTab === 1 ? item.inject_time : (item.measure_time || '')) }}</text>
             </view>
             <view class="tags-row">
-              <text class="status-tag">{{ currentTab === 0 ? item.status : item.insulin_type }}</text>
+              <text class="status-tag">{{ currentTab === 0 ? item.status : (currentTab === 1 ? item.insulin_type : '称重') }}</text>
             </view>
             <text class="note-text" v-if="item.note">{{ item.note }}</text>
           </view>
@@ -28,9 +29,13 @@
                 <text class="value-text" :class="getBgColorClass(item.bg_value)">{{ item.bg_value }}</text>
                 <text class="unit">mmol/L</text>
               </template>
-              <template v-else>
+              <template v-else-if="currentTab === 1">
                 <text class="value-text type-insulin">{{ item.dose }}</text>
                 <text class="unit">U</text>
+              </template>
+              <template v-else>
+                <text class="value-text type-weight">{{ item.weight_value }}</text>
+                <text class="unit">kg</text>
               </template>
             </view>
             <view class="action-wrap">
@@ -61,9 +66,10 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { onLoad, onShow } from '@dcloudio/uni-app'
+import { onLoad, onShow, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
+import { callApi } from '@/utils/api'
 
-const currentTab = ref(0) // 0: 血糖, 1: 打针
+const currentTab = ref(0) // 0: 血糖, 1: 打针, 2: 体重
 const records = ref<any[]>([])
 const isLoading = ref(false)
 const isRefreshing = ref(false)
@@ -78,6 +84,30 @@ onLoad(() => {
 onShow(() => {
   if (records.value.length > 0) {
     loadData(true)
+  }
+})
+
+onShareAppMessage(() => {
+  const userInfoStr = uni.getStorageSync('userInfo')
+  let openid = ''
+  if (userInfoStr) {
+    openid = JSON.parse(userInfoStr).openid || ''
+  }
+  return {
+    title: '猫咪血糖监测日记',
+    path: openid ? `/pages/index/index?inviter=${openid}` : '/pages/index/index'
+  }
+})
+
+onShareTimeline(() => {
+  const userInfoStr = uni.getStorageSync('userInfo')
+  let openid = ''
+  if (userInfoStr) {
+    openid = JSON.parse(userInfoStr).openid || ''
+  }
+  return {
+    title: '猫咪血糖监测日记',
+    query: openid ? `inviter=${openid}` : ''
   }
 })
 
@@ -109,20 +139,15 @@ const loadData = async (isReset: boolean) => {
   }
 
   try {
-    // @ts-ignore
-    if (typeof wx === 'undefined' || !wx.cloud) return
-    // @ts-ignore
-    const db = wx.cloud.database()
     const catId = uni.getStorageSync('currentCatId') || 'default'
+    const collectionName = currentTab.value === 0 ? 'blood_glucose' : (currentTab.value === 1 ? 'insulin_records' : 'weight_records')
     
-    const collectionName = currentTab.value === 0 ? 'blood_glucose' : 'insulin_records'
-    
-    const res = await db.collection(collectionName)
-      .where({ cat_id: catId })
-      .orderBy('createTime', 'desc')
-      .skip(records.value.length)
-      .limit(PAGE_SIZE)
-      .get()
+    const res = await callApi('getRecords', {
+      catId,
+      type: collectionName,
+      limit: PAGE_SIZE,
+      skip: records.value.length
+    })
       
     if (res.data.length < PAGE_SIZE) {
       hasMore.value = false
@@ -152,11 +177,15 @@ const onLongPress = (id: string) => {
 const deleteRecord = async (id: string) => {
   uni.showLoading({ title: '删除中' })
   try {
-    // @ts-ignore
-    const db = wx.cloud.database()
-    const collectionName = currentTab.value === 0 ? 'blood_glucose' : 'insulin_records'
+    const catId = uni.getStorageSync('currentCatId') || 'default'
+    const collectionName = currentTab.value === 0 ? 'blood_glucose' : (currentTab.value === 1 ? 'insulin_records' : 'weight_records')
     
-    await db.collection(collectionName).doc(id).remove()
+    await callApi('deleteRecord', {
+      catId,
+      type: collectionName,
+      recordId: id
+    })
+    
     uni.showToast({ title: '删除成功', icon: 'success' })
     // 从列表中移除
     records.value = records.value.filter(item => item._id !== id)
@@ -321,6 +350,7 @@ const getBgColorClass = (value: number) => {
 .text-danger { color: #E74C3C; }
 .text-warning { color: #F1C40F; }
 .type-insulin { color: #3498DB; }
+.type-weight { color: #8E44AD; }
 
 .empty-state {
   padding: 100rpx 0;

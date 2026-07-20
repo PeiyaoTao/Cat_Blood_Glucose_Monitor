@@ -18,5 +18,18 @@
     "useIsolateContext": false,
     "ignoreDevUnusedFiles": true
   },
-  "libVersion": "3.15.2"
+  "libVersion": "3.15.2",
+  "condition": {
+    "miniprogram": {
+      "list": [
+        {
+          "name": "模拟家庭成员点击链接",
+          "pathName": "pages/index/index",
+          "query": "inviter=o6Ej0xdbjwdhimtRTzoeGEXHkr-c",
+          "scene": null,
+          "launchMode": "default"
+        }
+      ]
+    }
+  }
 }

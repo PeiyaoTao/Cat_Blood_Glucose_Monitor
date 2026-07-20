@@ -44,6 +44,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { callApi } from '@/utils/api'
 
 const statusOptions = ['空腹', '餐后2小时', '餐后4小时', '打针前', '打针后2小时', '随机']
 const statusIndex = ref(0)
@@ -77,29 +78,21 @@ const submitRecord = async () => {
   isSubmitting.value = true
   
   try {
-    // @ts-ignore: wx is injected by miniprogram
-    if (typeof wx !== 'undefined' && wx.cloud) {
-      // @ts-ignore
-      const db = wx.cloud.database()
-      
-      await db.collection('blood_glucose').add({
-        data: {
-          cat_id: uni.getStorageSync('currentCatId') || 'default',
-          bg_value: parseFloat(formData.value.bg_value),
-          status: statusOptions[statusIndex.value],
-          measure_time: formData.value.time, 
-          note: formData.value.note,
-          createTime: db.serverDate()
-        }
-      })
-      
-      uni.showToast({ title: '记录成功', icon: 'success' })
-      setTimeout(() => {
-        uni.navigateBack()
-      }, 1500)
-    } else {
-      uni.showToast({ title: '请在微信环境中运行', icon: 'none' })
+    const recordData = {
+      cat_id: uni.getStorageSync('currentCatId') || 'default',
+      bg_value: numValue,
+      status: statusOptions[statusIndex.value],
+      measure_time: formData.value.time, 
+      note: formData.value.note,
+      createTime: Date.now()
     }
+    
+    await callApi('addRecord', { type: 'blood_glucose', recordData })
+    
+    uni.showToast({ title: '记录成功', icon: 'success' })
+    setTimeout(() => {
+      uni.navigateBack()
+    }, 1500)
   } catch (err: any) {
     console.error(err)
     uni.showToast({ title: '提交失败:' + err.message, icon: 'none', duration: 3000 })

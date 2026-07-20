@@ -44,6 +44,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { callApi } from '@/utils/api'
 
 const insulinOptions = ['甘精胰岛素 (Glargine)', '地特胰岛素 (Detemir)', '中效胰岛素 (NPH)', '其他']
 const insulinIndex = ref(0)
@@ -77,32 +78,23 @@ const submitRecord = async () => {
   isSubmitting.value = true
   
   try {
-    // @ts-ignore
-    if (typeof wx !== 'undefined' && wx.cloud) {
-      // @ts-ignore
-      const db = wx.cloud.database()
-      
-      await db.collection('insulin_records').add({
-        data: {
-          cat_id: uni.getStorageSync('currentCatId') || 'default',
-          dose: numValue,
-          insulin_type: insulinOptions[insulinIndex.value],
-          inject_time: formData.value.time, 
-          note: formData.value.note,
-          createTime: db.serverDate()
-        }
-      })
-      
-      uni.showToast({ title: '注射记录成功', icon: 'success' })
-      setTimeout(() => {
-        uni.navigateBack()
-      }, 1500)
-    } else {
-      uni.showToast({ title: '请在微信环境中运行', icon: 'none' })
+    const recordData = {
+      cat_id: uni.getStorageSync('currentCatId') || 'default',
+      dose: numValue,
+      insulin_type: insulinOptions[insulinIndex.value],
+      inject_time: formData.value.time, 
+      note: formData.value.note,
+      createTime: Date.now()
     }
+    
+    await callApi('addRecord', { type: 'insulin_records', recordData })
+    
+    uni.showToast({ title: '注射记录成功', icon: 'success' })
+    setTimeout(() => {
+      uni.navigateBack()
+    }, 1500)
   } catch (err: any) {
     console.error(err)
-    // 捕获集合不存在等错误
     if (err.message && err.message.includes('not exist')) {
       uni.showToast({ title: '请先在云开发控制台创建 insulin_records 集合！', icon: 'none', duration: 4000 })
     } else {
