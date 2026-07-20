@@ -56,6 +56,9 @@ const userInfo = ref({
   openid: ''
 })
 
+let lastSavedNickName = ''
+let lastSavedAvatarUrl = ''
+
 onLoad(async () => {
   // 优先从云端拉取最新信息（解决清除缓存后数据丢失问题）
   try {
@@ -63,12 +66,16 @@ onLoad(async () => {
     if (res && res.userInfo) {
       userInfo.value = res.userInfo
       uni.setStorageSync('userInfo', JSON.stringify(userInfo.value))
+      lastSavedNickName = userInfo.value.nickName
+      lastSavedAvatarUrl = userInfo.value.avatarUrl
     }
   } catch (e) {
     // 降级使用本地缓存
     const cachedUserInfo = uni.getStorageSync('userInfo')
     if (cachedUserInfo) {
       userInfo.value = JSON.parse(cachedUserInfo)
+      lastSavedNickName = userInfo.value.nickName
+      lastSavedAvatarUrl = userInfo.value.avatarUrl
     }
   }
   
@@ -139,6 +146,10 @@ const onNicknameChange = (e: any) => {
 }
 
 const saveUserInfo = async () => {
+  if (userInfo.value.nickName === lastSavedNickName && userInfo.value.avatarUrl === lastSavedAvatarUrl) {
+    return // 未发生变化，直接拦截，防止由于组件初始化带来的自动触发而导致云端数据被覆盖
+  }
+
   console.log('Current nickname before save:', userInfo.value.nickName)
   if (!userInfo.value.nickName || String(userInfo.value.nickName).trim() === '') {
     uni.showModal({ title: '提示', content: '昵称不能为空', showCancel: false })
@@ -152,6 +163,8 @@ const saveUserInfo = async () => {
         nickName: userInfo.value.nickName,
         avatarUrl: userInfo.value.avatarUrl
       })
+      lastSavedNickName = userInfo.value.nickName
+      lastSavedAvatarUrl = userInfo.value.avatarUrl
     }
   } catch (e: any) {
     console.error('Failed to sync user info to cloud', e)
