@@ -292,15 +292,12 @@ exports.main = async (event, context) => {
           } catch(e){}
         }
         
-        const userMap = {}
-        data.forEach(u => {
-          userMap[u._openid] = {
-            nickName: u.nickName,
-            avatarUrl: (u.avatarUrl && u.avatarUrl.startsWith('cloud://')) ? urlMap[u.avatarUrl] : u.avatarUrl
-          }
-        })
+        const updatedData = data.map(u => ({
+          ...u,
+          avatarUrl: (u.avatarUrl && u.avatarUrl.startsWith('cloud://')) ? (urlMap[u.avatarUrl] || u.avatarUrl) : u.avatarUrl
+        }))
         
-        return { success: true, users: userMap }
+        return { success: true, data: updatedData }
       }
 
       case 'getMyInfo': {
