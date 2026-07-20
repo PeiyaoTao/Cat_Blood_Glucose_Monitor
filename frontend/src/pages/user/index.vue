@@ -56,11 +56,20 @@ const userInfo = ref({
   openid: ''
 })
 
-onLoad(() => {
-  // 从本地缓存读取用户信息
-  const cachedInfo = uni.getStorageSync('userInfo')
-  if (cachedInfo) {
-    userInfo.value = JSON.parse(cachedInfo)
+onLoad(async () => {
+  // 优先从云端拉取最新信息（解决清除缓存后数据丢失问题）
+  try {
+    const res = await callApi('getMyInfo')
+    if (res && res.userInfo) {
+      userInfo.value = res.userInfo
+      uni.setStorageSync('userInfo', JSON.stringify(userInfo.value))
+    }
+  } catch (e) {
+    // 降级使用本地缓存
+    const cachedUserInfo = uni.getStorageSync('userInfo')
+    if (cachedUserInfo) {
+      userInfo.value = JSON.parse(cachedUserInfo)
+    }
   }
   
   // 如果没有 openid，执行静默登录
@@ -129,6 +138,11 @@ const onNicknameChange = (e: any) => {
 }
 
 const saveUserInfo = async () => {
+  if (!userInfo.value.nickName || userInfo.value.nickName.trim() === '') {
+    uni.showToast({ title: '昵称不能为空', icon: 'none' })
+    return
+  }
+  
   uni.setStorageSync('userInfo', JSON.stringify(userInfo.value))
   try {
     if (userInfo.value.openid) {
