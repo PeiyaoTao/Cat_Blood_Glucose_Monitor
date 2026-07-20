@@ -86,7 +86,8 @@ const login = async () => {
       const res = await wx.cloud.callFunction({ name: 'login' })
       if (res.result && res.result.openid) {
         userInfo.value.openid = res.result.openid
-        saveUserInfo()
+        // 不在这里调用 saveUserInfo，防止在未拉取到云端数据时，用默认头像昵称覆盖云端
+        uni.setStorageSync('userInfo', JSON.stringify(userInfo.value))
       } else {
         uni.showToast({ title: '获取ID失败', icon: 'none' })
       }
