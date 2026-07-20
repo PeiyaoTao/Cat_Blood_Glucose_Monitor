@@ -138,8 +138,9 @@ const onNicknameChange = (e: any) => {
 }
 
 const saveUserInfo = async () => {
-  if (!userInfo.value.nickName || userInfo.value.nickName.trim() === '') {
-    uni.showToast({ title: '昵称不能为空', icon: 'none' })
+  console.log('Current nickname before save:', userInfo.value.nickName)
+  if (!userInfo.value.nickName || String(userInfo.value.nickName).trim() === '') {
+    uni.showModal({ title: '提示', content: '昵称不能为空', showCancel: false })
     return
   }
   
@@ -157,6 +158,8 @@ const saveUserInfo = async () => {
     if (errorStr.includes('CONTENT_SECURITY_FAILED')) {
       uni.showModal({ title: '安全提示', content: '所发布内容含违规信息，请修改后重试', showCancel: false })
       if (userInfo.value.avatarUrl) { userInfo.value.avatarUrl = '' }
+    } else if (errorStr.includes('昵称不能为空')) {
+      uni.showToast({ title: '昵称不能为空', icon: 'none' })
     } else {
       uni.showToast({ title: '同步资料失败', icon: 'none' })
     }
