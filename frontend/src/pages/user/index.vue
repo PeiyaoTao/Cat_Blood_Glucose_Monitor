@@ -56,7 +56,7 @@ const userInfo = ref({
   openid: ''
 })
 
-let lastSavedNickName = ''
+let lastSavedNickName = '铲屎官'
 let lastSavedAvatarUrl = ''
 
 onLoad(async () => {
