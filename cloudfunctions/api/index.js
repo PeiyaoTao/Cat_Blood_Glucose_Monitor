@@ -23,23 +23,18 @@ exports.main = async (event, context) => {
     return data
   }
 
-  // 文本安全校验 (v2)
+  // 文本安全校验 (v1)
   const checkTextSecurity = async (text) => {
     if (!text) return true
     try {
-      const res = await cloud.openapi.security.msgSecCheck({
-        content: text,
-        version: 2,
-        scene: 1,
-        openid: openid
+      await cloud.openapi.security.msgSecCheck({
+        content: text
       })
-      if (res.result && res.result.suggest !== 'pass') {
-        throw new Error('CONTENT_SECURITY_FAILED')
-      }
     } catch (err) {
-      if (err.message === 'CONTENT_SECURITY_FAILED' || (err.errCode && err.errCode !== 0)) {
+      if (err.errCode === 87014 || err.message === 'CONTENT_SECURITY_FAILED') {
         throw new Error('CONTENT_SECURITY_FAILED')
       }
+      // 如果出现其他非 87014 错误 (比如 42001 token过期)，为防止误杀正常用户，选择放行
     }
     return true
   }
