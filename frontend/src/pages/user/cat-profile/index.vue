@@ -185,7 +185,10 @@ const saveProfile = async () => {
     setTimeout(() => { uni.navigateBack() }, 1500)
   } catch (err: any) {
     console.error(err)
-    if (err.message && err.message.includes('not exist')) {
+    if (err.message && err.message.includes('CONTENT_SECURITY_FAILED')) {
+      uni.showModal({ title: '安全提示', content: '所发布内容含违规信息，请修改后重试', showCancel: false })
+      if (formData.value.avatar) { formData.value.avatar = '' } // 违规图片可能已被云端清理，前端清空
+    } else if (err.message && err.message.includes('not exist')) {
       uni.showToast({ title: '请先在云开发控制台创建集合！', icon: 'none', duration: 4000 })
     } else {
       uni.showToast({ title: '保存失败', icon: 'none' })

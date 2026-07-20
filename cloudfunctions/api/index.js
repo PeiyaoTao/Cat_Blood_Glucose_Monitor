@@ -15,12 +15,62 @@ exports.main = async (event, context) => {
   // Helper: check if user has access to a cat
   // returns the cat doc if access is granted, otherwise throws error
   const checkCatAccess = async (catId) => {
-    if (!catId) throw new Error('Missing catId')
     const { data } = await db.collection('cats').doc(catId).get()
-    if (data._openid === openid || (data.shared_with && data.shared_with.includes(openid))) {
-      return data
+    if (!data) throw new Error('Cat not found')
+    if (data._openid !== openid && (!data.shared_with || !data.shared_with.includes(openid))) {
+      throw new Error('Permission denied')
     }
-    throw new Error('Access denied')
+    return data
+  }
+
+  // 文本安全校验 (v2)
+  const checkTextSecurity = async (text) => {
+    if (!text) return true
+    try {
+      const res = await cloud.openapi.security.msgSecCheck({
+        content: text,
+        version: 2,
+        scene: 1,
+        openid: openid
+      })
+      if (res.result && res.result.suggest !== 'pass') {
+        throw new Error('CONTENT_SECURITY_FAILED')
+      }
+    } catch (err) {
+      if (err.message === 'CONTENT_SECURITY_FAILED' || (err.errCode && err.errCode !== 0)) {
+        throw new Error('CONTENT_SECURITY_FAILED')
+      }
+    }
+    return true
+  }
+
+  // 图片安全校验 (v1)
+  const checkImageSecurity = async (fileID) => {
+    if (!fileID || !fileID.startsWith('cloud://')) return true
+    try {
+      // 1. 下载云文件
+      const res = await cloud.downloadFile({ fileID })
+      const buffer = res.fileContent
+      // 2. 校验文件
+      await cloud.openapi.security.imgSecCheck({
+        media: {
+          contentType: 'image/jpeg',
+          value: buffer
+        }
+      })
+    } catch (err) {
+      if (err.errCode && err.errCode === 87014) { // 87014: 内容违规
+        // 发现违规，自动删除该违规图片
+        try { await cloud.deleteFile({ fileList: [fileID] }) } catch(e){}
+        throw new Error('CONTENT_SECURITY_FAILED')
+      }
+      // 如果是图片太大 (87015) 或者其他错误，这里保守起见放行或抛出。
+      // 为防止误杀，如果是 87014 才拦截
+      if (err.message === 'CONTENT_SECURITY_FAILED' || err.errCode === 87014) {
+        throw new Error('CONTENT_SECURITY_FAILED')
+      }
+    }
+    return true
   }
 
   try {
@@ -116,6 +166,15 @@ exports.main = async (event, context) => {
 
       case 'saveCat': {
         const { catId, catData } = payload
+        
+        // 执行安全校验
+        if (catData.name) {
+          await checkTextSecurity(catData.name)
+        }
+        if (catData.avatar) {
+          await checkImageSecurity(catData.avatar)
+        }
+
         if (catId) {
           // Update existing cat
           const cat = await checkCatAccess(catId)
@@ -189,6 +248,15 @@ exports.main = async (event, context) => {
 
       case 'saveUser': {
         const { nickName, avatarUrl } = payload
+        
+        // 执行安全校验
+        if (nickName) {
+          await checkTextSecurity(nickName)
+        }
+        if (avatarUrl) {
+          await checkImageSecurity(avatarUrl)
+        }
+
         const { data } = await db.collection('users').where({ _openid: openid }).get()
         if (data && data.length > 0) {
           await db.collection('users').doc(data[0]._id).update({

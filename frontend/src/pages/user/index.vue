@@ -137,8 +137,14 @@ const saveUserInfo = async () => {
         avatarUrl: userInfo.value.avatarUrl
       })
     }
-  } catch (e) {
+  } catch (e: any) {
     console.error('Failed to sync user info to cloud', e)
+    if (e.message && e.message.includes('CONTENT_SECURITY_FAILED')) {
+      uni.showModal({ title: '安全提示', content: '所发布内容含违规信息，请修改后重试', showCancel: false })
+      if (userInfo.value.avatarUrl) { userInfo.value.avatarUrl = '' }
+    } else {
+      uni.showToast({ title: '同步资料失败', icon: 'none' })
+    }
   }
 }
 
