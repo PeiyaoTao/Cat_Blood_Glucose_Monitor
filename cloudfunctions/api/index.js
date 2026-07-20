@@ -26,9 +26,6 @@ exports.main = async (event, context) => {
   // 文本安全校验 (v1)
   const checkTextSecurity = async (text) => {
     if (!text) return true
-    if (text.includes('特34567890')) {
-      throw new Error('CONTENT_SECURITY_FAILED')
-    }
     try {
       await cloud.openapi.security.msgSecCheck({
         content: text
