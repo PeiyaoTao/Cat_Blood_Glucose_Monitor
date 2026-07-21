@@ -8,7 +8,7 @@
         <view class="edit-badge">✎</view>
       </button>
       <view class="user-info">
-        <input type="nickname" class="username-input" :value="userInfo.nickName" @blur="onNicknameBlur" @change="onNicknameChange" placeholder="点击输入铲屎官昵称" />
+        <input type="nickname" class="username-input" :value="userInfo.nickName" @change="onNicknameChange" placeholder="点击输入铲屎官昵称" />
         <text class="sub-text" @click="copyId" v-if="userInfo.openid">ID: {{ userInfo.openid.substring(0,8) }} <text style="font-size: 20rpx; color: #BDC3C7; margin-left: 8rpx;">[点击复制完整ID]</text></text>
         <text class="sub-text" v-else>ID: 获取中...</text>
       </view>
@@ -106,6 +106,8 @@ const login = async () => {
 }
 
 const onChooseAvatar = async (e: any) => {
+  if (!e.detail || !e.detail.avatarUrl) return
+  
   const tempPath = e.detail.avatarUrl
   // 先在本地显示
   userInfo.value.avatarUrl = tempPath
@@ -136,28 +138,33 @@ const onChooseAvatar = async (e: any) => {
   }
 }
 
-const onNicknameBlur = (e: any) => {
-  userInfo.value.nickName = e.detail.value
-  saveUserInfo()
-}
 const onNicknameChange = (e: any) => {
   userInfo.value.nickName = e.detail.value
   saveUserInfo()
 }
 
+let isSaving = false
 const saveUserInfo = async () => {
+  if (isSaving) return
   if (userInfo.value.nickName === lastSavedNickName && userInfo.value.avatarUrl === lastSavedAvatarUrl) {
     return // 未发生变化，直接拦截，防止由于组件初始化带来的自动触发而导致云端数据被覆盖
   }
 
-  console.log('Current nickname before save:', userInfo.value.nickName)
-  if (!userInfo.value.nickName || String(userInfo.value.nickName).trim() === '') {
-    uni.showModal({ title: '提示', content: '昵称不能为空', showCancel: false })
-    return
-  }
-  
-  uni.setStorageSync('userInfo', JSON.stringify(userInfo.value))
+  isSaving = true
   try {
+    console.log('Current nickname before save:', userInfo.value.nickName)
+    if (!userInfo.value.nickName || String(userInfo.value.nickName).trim() === '') {
+      uni.showToast({ title: '昵称不能为空', icon: 'none' })
+      // 强制刷新UI，先设置为空格然后再恢复，打破双向绑定缓存
+      const correctName = lastSavedNickName
+      userInfo.value.nickName = ' '
+      setTimeout(() => {
+        userInfo.value.nickName = correctName
+      }, 50)
+      return
+    }
+    
+    uni.setStorageSync('userInfo', JSON.stringify(userInfo.value))
     if (userInfo.value.openid) {
       await callApi('saveUser', {
         nickName: userInfo.value.nickName,
@@ -177,6 +184,8 @@ const saveUserInfo = async () => {
     } else {
       uni.showToast({ title: '同步资料失败', icon: 'none' })
     }
+  } finally {
+    isSaving = false
   }
 }
 

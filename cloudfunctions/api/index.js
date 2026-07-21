@@ -23,18 +23,24 @@ exports.main = async (event, context) => {
     return data
   }
 
-  // 文本安全校验 (v1)
+  // 文本安全校验 (v2)
   const checkTextSecurity = async (text) => {
     if (!text) return true
     try {
-      await cloud.openapi.security.msgSecCheck({
+      const res = await cloud.openapi.security.msgSecCheck({
+        openid: openid,
+        scene: 1,
+        version: 2,
         content: text
       })
+      if (res && res.result && res.result.suggest !== 'pass') {
+        throw new Error('CONTENT_SECURITY_FAILED')
+      }
     } catch (err) {
       if (err.errCode === 87014 || (err.message && err.message.includes('87014')) || (err.errMsg && err.errMsg.includes('87014')) || err.message === 'CONTENT_SECURITY_FAILED') {
         throw new Error('CONTENT_SECURITY_FAILED')
       }
-      // 如果出现其他非 87014 错误 (比如 42001 token过期)，为防止误杀正常用户，选择放行
+      // 对于其他非 87014 错误，依然放行防误杀
     }
     return true
   }
@@ -140,22 +146,8 @@ exports.main = async (event, context) => {
           { shared_with: openid }
         ])).get()
         
-        const fileList = data.map(c => c.avatar).filter(url => url && url.startsWith('cloud://'))
-        if (fileList.length > 0) {
-          try {
-            const res = await cloud.getTempFileURL({ fileList })
-            const urlMap = {}
-            res.fileList.forEach(f => { urlMap[f.fileID] = f.tempFileURL })
-            data.forEach(c => {
-              if (c.avatar && urlMap[c.avatar]) {
-                c.avatar = urlMap[c.avatar]
-              }
-            })
-          } catch(e) {
-            console.error('Failed to get temp URLs for cats', e)
-          }
-        }
-        
+        // 不再转换 tempFileURL，微信端原生支持 cloud:// 且无过期问题
+
         return { success: true, data }
       }
 
@@ -281,37 +273,16 @@ exports.main = async (event, context) => {
           _openid: _.in(queryOpenids)
         }).get()
         
-        const urlMap = {}
-        const fileList = data.map(u => u.avatarUrl).filter(url => url && url.startsWith('cloud://'))
-        if (fileList.length > 0) {
-          try {
-            const { fileList: tempFiles } = await cloud.getTempFileURL({ fileList })
-            tempFiles.forEach(tf => {
-              urlMap[tf.fileID] = tf.tempFileURL
-            })
-          } catch(e){}
-        }
+        // 不再转换 tempFileURL，微信端原生支持 cloud:// 且无过期问题
         
-        const updatedData = data.map(u => ({
-          ...u,
-          avatarUrl: (u.avatarUrl && u.avatarUrl.startsWith('cloud://')) ? (urlMap[u.avatarUrl] || u.avatarUrl) : u.avatarUrl
-        }))
-        
-        return { success: true, data: updatedData }
+        return { success: true, data }
       }
 
       case 'getMyInfo': {
         const { data } = await db.collection('users').where({ _openid: openid }).get()
         if (data && data.length > 0) {
-          let avatarTempUrl = data[0].avatarUrl
-          if (avatarTempUrl && avatarTempUrl.startsWith('cloud://')) {
-            try {
-              const { fileList } = await cloud.getTempFileURL({ fileList: [avatarTempUrl] })
-              if (fileList && fileList.length > 0) {
-                avatarTempUrl = fileList[0].tempFileURL
-              }
-            } catch(e){}
-          }
+          // 原生使用 cloud://
+          const avatarTempUrl = data[0].avatarUrl
           return { success: true, userInfo: { openid: openid, nickName: data[0].nickName, avatarUrl: avatarTempUrl } }
         }
         return { success: true, userInfo: { openid: openid, nickName: '铲屎官', avatarUrl: '' } }
