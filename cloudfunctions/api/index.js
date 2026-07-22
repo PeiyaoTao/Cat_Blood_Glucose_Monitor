@@ -225,12 +225,63 @@ exports.main = async (event, context) => {
         await checkCatAccess(catId)
         const collectionName = type
         
-        // Extra check: if user is not creator of the cat, they can only delete their own records
-        // Wait, family sharing logic: should family members be able to delete any records? 
-        // We will allow anyone with access to the cat to delete records for now.
-        
         await db.collection(collectionName).doc(recordId).remove()
         return { success: true }
+      }
+
+      case 'recognizeNutrition': {
+        const { fileID } = payload
+        if (!fileID) throw new Error('Missing fileID')
+        
+        let ocrText = ''
+        try {
+          // 获取临时真实 HTTP 链接
+          const tempRes = await cloud.getTempFileURL({
+            fileList: [fileID]
+          })
+          const imgUrl = tempRes.fileList[0].tempFileURL
+          
+          // 调用微信原生 OCR 接口
+          const ocrRes = await cloud.openapi.ocr.printedText({
+            imgUrl: imgUrl
+          })
+          
+          if (ocrRes.items) {
+            ocrText = ocrRes.items.map(item => item.text).join(' ')
+          }
+        } catch (e) {
+          console.error('OCR Error:', e)
+          try { await cloud.deleteFile({ fileList: [fileID] }) } catch(delErr){}
+          throw new Error('识别失败: ' + (e.errMsg || e.message || '未知错误'))
+        }
+        
+        // 识别完成后立即删除临时图片，节省云空间
+        try { await cloud.deleteFile({ fileList: [fileID] }) } catch(e){}
+        
+        // 核心解析算法 3.0（严格非中文字符跨越，彻底杜绝配料表串台）
+        // 允许跨越：英文字母、符号、空格，以及极少量的特定允许汉字
+        // 拒绝跨越：任何数字、任何其他任意中文字符（如“素”、“外”、“蛋”、“肉”）
+        const parseValue = (keywords) => {
+          for (const keyword of keywords) {
+            // 允许的汉字白名单：质,分,含,量,最,大,小,多,少,高,低,以,上,下,不,于,等,保,证,值,承,诺,标,准,一 (防止把破折号识别成一)
+            const regex = new RegExp(keyword + "(?:[^0-9\\u4e00-\\u9fa5]|[质分含量最大最小多少高低以上下不于等保证值承诺标准一]){0,45}?(\\d+(?:\\.\\d+)?)")
+            const match = ocrText.match(regex)
+            if (match && match[1]) {
+              return match[1]
+            }
+          }
+          return ''
+        }
+        
+        const result = {
+          protein: parseValue(['粗蛋白', '蛋白质', '蛋白']),
+          fat: parseValue(['粗脂肪', '脂肪']),
+          moisture: parseValue(['水分', '水份']),
+          fiber: parseValue(['粗纤维', '纤维']),
+          ash: parseValue(['粗灰分', '灰分'])
+        }
+        
+        return { success: true, text: ocrText, parsed: result }
       }
 
       case 'saveUser': {
