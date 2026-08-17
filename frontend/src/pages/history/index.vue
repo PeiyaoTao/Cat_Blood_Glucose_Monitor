@@ -18,8 +18,26 @@
               <text class="time">{{ currentTab === 0 ? item.measure_time : (currentTab === 1 ? item.inject_time : (item.measure_time || '')) }}</text>
             </view>
             <view class="tags-row">
-              <text class="status-tag">{{ currentTab === 0 ? item.status : (currentTab === 1 ? item.insulin_type : '称重') }}</text>
+              <text class="status-tag" v-if="currentTab === 0">{{ item.period || item.status || '常规' }}</text>
+              <template v-else-if="currentTab === 1">
+                <text class="status-tag">{{ item.period || '注射' }}</text>
+                <text class="status-tag tag-secondary" v-if="item.dose_adjustment && item.dose_adjustment !== '维持原量'">{{ item.dose_adjustment }}</text>
+                <text class="status-tag tag-type">{{ item.insulin_type }}</text>
+              </template>
+              <text class="status-tag" v-else>称重</text>
             </view>
+            
+            <!-- 详细进食与辅助信息 -->
+            <view class="extra-info" v-if="currentTab === 0 && (item.meal_time || item.food_grams)">
+              <text class="extra-text">🍽️ 进食: {{ item.meal_time ? item.meal_time + ' ' : '' }}{{ item.food_grams ? item.food_grams + 'g' : '' }}</text>
+            </view>
+
+            <view class="extra-info" v-if="currentTab === 1 && (item.food_brand || item.extras || item.urine)">
+              <text class="extra-text" v-if="item.food_brand">🥫 {{ item.food_brand }}</text>
+              <text class="extra-text" v-if="item.extras">💊 {{ item.extras }}</text>
+              <text class="extra-text" v-if="item.urine">💧 尿量: {{ item.urine }}</text>
+            </view>
+
             <text class="note-text" v-if="item.note">{{ item.note }}</text>
           </view>
           
@@ -293,14 +311,41 @@ const getBgColorClass = (value: number) => {
 }
 .tags-row {
   margin-bottom: 12rpx;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
 }
 .status-tag {
   display: inline-block;
   padding: 4rpx 16rpx;
-  background: #F7F9FC;
-  color: #7F8C8D;
+  background: #E8F8F5;
+  color: #16A085;
   font-size: 22rpx;
   border-radius: 8rpx;
+  font-weight: 500;
+}
+.tag-secondary {
+  background: #FEF9E7;
+  color: #D4AC0D;
+}
+.tag-type {
+  background: #EBF5FB;
+  color: #2980B9;
+}
+.extra-info {
+  margin-bottom: 8rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+.extra-text {
+  font-size: 22rpx;
+  color: #7F8C8D;
+  background: #F8F9FA;
+  padding: 4rpx 12rpx;
+  border-radius: 6rpx;
+  display: inline-block;
+  width: fit-content;
 }
 .note-text {
   font-size: 24rpx;

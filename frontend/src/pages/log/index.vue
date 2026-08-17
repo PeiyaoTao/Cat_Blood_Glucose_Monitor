@@ -2,17 +2,17 @@
   <view class="container">
     <view class="card">
       <view class="form-group">
-        <text class="label">血糖数值 (mmol/L)</text>
+        <text class="label">血糖数值 (mmol/L) <text class="required">*</text></text>
         <view class="input-wrap huge-input">
           <input type="digit" v-model="formData.bg_value" placeholder="0.0" class="bg-input" />
         </view>
       </view>
 
       <view class="form-group">
-        <text class="label">测量状态</text>
-        <picker :range="statusOptions" @change="onStatusChange" :value="statusIndex">
+        <text class="label">时效阶段 (与就诊表对齐)</text>
+        <picker :range="periodOptions" @change="onPeriodChange" :value="periodIndex">
           <view class="picker-view">
-            {{ statusOptions[statusIndex] }}
+            {{ periodOptions[periodIndex] }}
             <text class="icon-arrow">▼</text>
           </view>
         </picker>
@@ -28,10 +28,31 @@
         </picker>
       </view>
 
+      <!-- 进食关联情况（选填） -->
+      <view class="section-title">进食与消化（选填）</view>
+      
+      <view class="grid-2">
+        <view class="form-group">
+          <text class="label">吃饭时间 (选填)</text>
+          <picker mode="time" @change="onMealTimeChange" :value="formData.meal_time">
+            <view class="picker-view">
+              {{ formData.meal_time || '未记录' }}
+              <text class="icon-arrow">▼</text>
+            </view>
+          </picker>
+        </view>
+        <view class="form-group">
+          <text class="label">进食克数 (g) (选填)</text>
+          <view class="input-wrap">
+            <input type="digit" v-model="formData.food_grams" placeholder="例如: 85" />
+          </view>
+        </view>
+      </view>
+
       <view class="form-group">
-        <text class="label">备注</text>
+        <text class="label">备注 (选填)</text>
         <view class="input-wrap">
-          <input type="text" v-model="formData.note" placeholder="精神状态、进食情况等..." />
+          <input type="text" v-model="formData.note" placeholder="精神状态、进食表现等..." />
         </view>
       </view>
     </view>
@@ -46,26 +67,53 @@
 import { ref } from 'vue'
 import { callApi } from '@/utils/api'
 
-const statusOptions = ['空腹', '餐后2小时', '餐后4小时', '打针前', '打针后2小时', '随机']
-const statusIndex = ref(0)
+// 与就诊记录表时效完全对齐
+const periodOptions = [
+  '早针',
+  '针后5小时',
+  '晚针',
+  '针后5小时',
+  '空腹',
+  '餐后2小时',
+  '加测/随机'
+]
+const periodIndex = ref(0)
 const isSubmitting = ref(false)
 
 const now = new Date()
-const currentHour = now.getHours().toString().padStart(2, '0')
+const hour = now.getHours()
+const currentHour = hour.toString().padStart(2, '0')
 const currentMinute = now.getMinutes().toString().padStart(2, '0')
+
+// 智能根据当前时间预选时效
+if (hour >= 6 && hour < 11) {
+  periodIndex.value = 0 // 早针
+} else if (hour >= 11 && hour < 16) {
+  periodIndex.value = 1 // 针后5小时
+} else if (hour >= 16 && hour < 22) {
+  periodIndex.value = 2 // 晚针
+} else {
+  periodIndex.value = 3 // 晚针后5小时
+}
 
 const formData = ref({
   bg_value: '',
   time: `${currentHour}:${currentMinute}`,
+  meal_time: '',
+  food_grams: '',
   note: ''
 })
 
-const onStatusChange = (e: any) => {
-  statusIndex.value = e.detail.value
+const onPeriodChange = (e: any) => {
+  periodIndex.value = e.detail.value
 }
 
 const onTimeChange = (e: any) => {
   formData.value.time = e.detail.value
+}
+
+const onMealTimeChange = (e: any) => {
+  formData.value.meal_time = e.detail.value
 }
 
 const submitRecord = async () => {
@@ -78,11 +126,15 @@ const submitRecord = async () => {
   isSubmitting.value = true
   
   try {
+    const periodName = periodOptions[periodIndex.value]
     const recordData = {
       cat_id: uni.getStorageSync('currentCatId') || 'default',
       bg_value: numValue,
-      status: statusOptions[statusIndex.value],
-      measure_time: formData.value.time, 
+      period: periodName,
+      status: periodName, // 保持与旧字段 status 兼容
+      measure_time: formData.value.time,
+      meal_time: formData.value.meal_time || '',
+      food_grams: formData.value.food_grams || '',
       note: formData.value.note,
       createTime: Date.now()
     }
@@ -104,13 +156,29 @@ const submitRecord = async () => {
 
 <style scoped>
 .form-group {
-  margin-bottom: 40rpx;
+  margin-bottom: 32rpx;
+}
+.required {
+  color: #E74C3C;
 }
 .label {
   font-size: 28rpx;
   color: var(--text-sub);
   margin-bottom: 16rpx;
   display: block;
+}
+.section-title {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: var(--text-main);
+  margin: 36rpx 0 20rpx 0;
+  padding-top: 24rpx;
+  border-top: 2rpx dashed #EAEDED;
+}
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20rpx;
 }
 .input-wrap {
   background: #F7F9FC;
@@ -148,6 +216,6 @@ const submitRecord = async () => {
 }
 .submit-btn {
   height: 100rpx;
-  margin-top: 60rpx;
+  margin-top: 40rpx;
 }
 </style>

@@ -262,7 +262,7 @@ const fetchRecentRecords = async () => {
     if (res.data) {
       recentRecords.value = res.data.slice(0, 4).map((item: any) => ({
         time: formatDisplayTime(item.createTime),
-        status: item.status,
+        status: item.period || item.status || '常规',
         value: item.bg_value
       }))
       rawGlucoseData = res.data
@@ -326,9 +326,10 @@ const renderChart = () => {
       categories,
       series: [{ name: "体重(kg)", data: dataPoints }]
     }
-    const minW = dataPoints.length ? Math.floor(Math.min(...dataPoints) - 1) : 0
-    const maxW = dataPoints.length ? Math.ceil(Math.max(...dataPoints) + 1) : 10
-    newOpts.yAxis.data = [{ min: minW > 0 ? minW : 0, max: maxW }]
+    const weights = rawWeightData.map(item => item.weight_value)
+    const minW = weights.length ? Math.floor(Math.min(...weights) - 1) : 0
+    const maxW = weights.length ? Math.ceil(Math.max(...weights) + 1) : 10
+    newOpts.yAxis.data = [{ min: Math.max(0, minW), max: maxW }]
     newOpts.extra.markLine.data = []
   }
 
@@ -349,7 +350,7 @@ const fetchRecentInsulins = async () => {
         }
         return {
           time: displayTime,
-          type: item.insulin_type || '胰岛素',
+          type: item.period ? `${item.period} · ${item.insulin_type || '胰岛素'}` : (item.insulin_type || '胰岛素'),
           dose: item.dose
         }
       })
