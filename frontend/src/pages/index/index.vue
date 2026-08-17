@@ -16,19 +16,38 @@
       </view>
     </view>
 
-    <!-- 快捷记录卡片 -->
+    <!-- 快捷记录卡片 (2x2 黄金网格布局) -->
     <view class="action-card card">
       <view class="card-title">今日操作</view>
-      <view class="btn-group">
-        <button class="btn btn-primary log-btn" @click="handleLogGlucose">
-          <view class="icon-svg icon-blood"></view> 记血糖
-        </button>
-        <button class="btn btn-secondary log-btn" @click="handleLogInsulin">
-          <view class="icon-svg icon-syringe"></view> 记打针
-        </button>
-        <button class="btn btn-secondary log-btn" style="background-color: #E8F8F5; color: #1ABC9C;" @click="handleLogWeight">
-          <view class="icon-svg icon-weight-sm"></view> 记体重
-        </button>
+      <view class="action-grid">
+        <view class="action-btn-item btn-glucose" @click="handleLogGlucose">
+          <view class="action-icon icon-blood-lg"></view>
+          <view class="action-info">
+            <text class="action-main-text">记血糖</text>
+            <text class="action-sub-text">测耳血数值</text>
+          </view>
+        </view>
+        <view class="action-btn-item btn-insulin" @click="handleLogInsulin">
+          <view class="action-icon icon-syringe-lg"></view>
+          <view class="action-info">
+            <text class="action-main-text">记打针</text>
+            <text class="action-sub-text">早晚胰岛素</text>
+          </view>
+        </view>
+        <view class="action-btn-item btn-meal" @click="handleLogMeal">
+          <view class="action-icon icon-meal-lg"></view>
+          <view class="action-info">
+            <text class="action-main-text">记饮食</text>
+            <text class="action-sub-text">罐头/克数/尿量</text>
+          </view>
+        </view>
+        <view class="action-btn-item btn-weight" @click="handleLogWeight">
+          <view class="action-icon icon-weight-lg"></view>
+          <view class="action-info">
+            <text class="action-main-text">记体重</text>
+            <text class="action-sub-text">定期称重监测</text>
+          </view>
+        </view>
       </view>
     </view>
 
@@ -417,6 +436,11 @@ const handleLogInsulin = () => {
   uni.navigateTo({ url: '/pages/log-insulin/index' })
 }
 
+const handleLogMeal = () => {
+  if (allCats.value.length === 0) { uni.showToast({ title: '请先添加猫咪', icon: 'none' }); return }
+  uni.navigateTo({ url: '/pages/log-meal/index' })
+}
+
 const handleLogWeight = () => {
   if (allCats.value.length === 0) { uni.showToast({ title: '请先添加猫咪', icon: 'none' }); return }
   uni.navigateTo({ url: '/pages/log-weight/index' })
@@ -529,41 +553,82 @@ const getGlucoseClass = (val: number) => {
   color: var(--text-sub);
 }
 
-/* 操作区 */
+/* 操作区 (2x2 黄金网格布局) */
 .action-card .card-title {
   margin-bottom: 24rpx;
 }
-.btn-group {
-  display: flex;
-  justify-content: space-between;
-  gap: 16rpx;
+.action-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20rpx;
 }
-.log-btn {
-  flex: 1;
-  height: 88rpx;
-  margin: 0;
+.action-btn-item {
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: 26rpx;
-  padding: 0;
+  padding: 24rpx 20rpx;
+  border-radius: 20rpx;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
 }
-.icon-svg {
-  width: 32rpx;
-  height: 32rpx;
-  margin-right: 8rpx;
+.action-btn-item:active {
+  transform: scale(0.98);
+  opacity: 0.9;
+}
+.btn-glucose {
+  background: linear-gradient(135deg, #FFF5F5, #FED7D7);
+  border: 2rpx solid rgba(229, 62, 62, 0.1);
+}
+.btn-insulin {
+  background: linear-gradient(135deg, #FFF8F0, #FEEBC8);
+  border: 2rpx solid rgba(221, 107, 32, 0.1);
+}
+.btn-meal {
+  background: linear-gradient(135deg, #FFFAF0, #FEFCBF);
+  border: 2rpx solid rgba(214, 158, 46, 0.1);
+}
+.btn-weight {
+  background: linear-gradient(135deg, #F0FFF4, #C6F6D5);
+  border: 2rpx solid rgba(56, 161, 105, 0.1);
+}
+
+.action-icon {
+  width: 48rpx;
+  height: 48rpx;
+  margin-right: 16rpx;
+  flex-shrink: 0;
   background-size: contain;
   background-repeat: no-repeat;
   background-position: center;
 }
-.icon-blood {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23FFFFFF' stroke='%23FFFFFF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z'/%3E%3C/svg%3E");
+.icon-blood-lg {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23E53E3E' stroke='%23E53E3E' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z'/%3E%3C/svg%3E");
 }
-.icon-syringe {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23FF8A65' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m18 2 4 4'/%3E%3Cpath d='m17 7 3-3'/%3E%3Cpath d='M19 9 8.7 19.3c-1 1-2.5 1-3.4 0l-.6-.6c-1-1-1-2.5 0-3.4L15 5'/%3E%3Cpath d='m9 11 4 4'/%3E%3Cpath d='m5 19-3 3'/%3E%3Cpath d='m14 4 6 6'/%3E%3C/svg%3E");
+.icon-syringe-lg {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23DD6B20' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m18 2 4 4'/%3E%3Cpath d='m17 7 3-3'/%3E%3Cpath d='M19 9 8.7 19.3c-1 1-2.5 1-3.4 0l-.6-.6c-1-1-1-2.5 0-3.4L15 5'/%3E%3Cpath d='m9 11 4 4'/%3E%3Cpath d='m5 19-3 3'/%3E%3Cpath d='m14 4 6 6'/%3E%3C/svg%3E");
 }
-.icon-weight-sm {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231ABC9C' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z'/%3E%3Cline x1='7' y1='7' x2='7.01' y2='7'/%3E%3C/svg%3E");
+.icon-meal-lg {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23D69E2E' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 8h1a4 4 0 0 1 0 8h-1'/%3E%3Cpath d='M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z'/%3E%3Cline x1='6' y1='1' x2='6' y2='4'/%3E%3Cline x1='10' y1='1' x2='10' y2='4'/%3E%3Cline x1='14' y1='1' x2='14' y2='4'/%3E%3C/svg%3E");
+}
+.icon-weight-lg {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2338A169' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z'/%3E%3Cline x1='7' y1='7' x2='7.01' y2='7'/%3E%3C/svg%3E");
+}
+
+.action-info {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.action-main-text {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: var(--text-main);
+  line-height: 1.2;
+  margin-bottom: 4rpx;
+}
+.action-sub-text {
+  font-size: 20rpx;
+  color: #718096;
+  line-height: 1.2;
 }
 
 /* 图表占位 */

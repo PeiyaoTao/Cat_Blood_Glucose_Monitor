@@ -75,7 +75,26 @@ exports.main = async (event, context) => {
     let insulinRecords = []
     isResults.forEach(res => { if (res.data) insulinRecords = insulinRecords.concat(res.data) })
 
-    // 3. 按日期分组整合数据
+    // 3. 获取独立饮食记录
+    const mlCountRes = await db.collection('meal_records').where(timeQuery).count()
+    const mlTotal = mlCountRes.total
+    const mlBatches = Math.ceil(mlTotal / MAX_LIMIT) || 1
+    let mlTasks = []
+    for (let i = 0; i < mlBatches; i++) {
+      mlTasks.push(
+        db.collection('meal_records')
+          .where(timeQuery)
+          .skip(i * MAX_LIMIT)
+          .limit(MAX_LIMIT)
+          .orderBy('createTime', 'asc')
+          .get()
+      )
+    }
+    const mlResults = await Promise.all(mlTasks)
+    let mealRecords = []
+    mlResults.forEach(res => { if (res.data) mealRecords = mealRecords.concat(res.data) })
+
+    // 4. 按日期分组整合数据
     const dayGroups = {}
 
     // 处理血糖记录
@@ -83,7 +102,7 @@ exports.main = async (event, context) => {
       const d = new Date(item.createTime || Date.now())
       const dateKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
       if (!dayGroups[dateKey]) {
-        dayGroups[dateKey] = { glucoses: [], insulins: [], dateStr: dateKey }
+        dayGroups[dateKey] = { glucoses: [], insulins: [], meals: [], dateStr: dateKey }
       }
       dayGroups[dateKey].glucoses.push(item)
     })
@@ -93,16 +112,24 @@ exports.main = async (event, context) => {
       const d = new Date(item.createTime || Date.now())
       const dateKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
       if (!dayGroups[dateKey]) {
-        dayGroups[dateKey] = { glucoses: [], insulins: [], dateStr: dateKey }
+        dayGroups[dateKey] = { glucoses: [], insulins: [], meals: [], dateStr: dateKey }
       }
       dayGroups[dateKey].insulins.push(item)
     })
 
+    // 处理饮食记录
+    mealRecords.forEach(item => {
+      const d = new Date(item.createTime || Date.now())
+      const dateKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+      if (!dayGroups[dateKey]) {
+        dayGroups[dateKey] = { glucoses: [], insulins: [], meals: [], dateStr: dateKey }
+      }
+      dayGroups[dateKey].meals.push(item)
+    })
+
     const sortedDates = Object.keys(dayGroups).sort((a, b) => new Date(a).getTime() - new Date(b).getTime())
 
-    // 4. 构建严格符合模板的数据行和合并单元格
-    // Row 0: 大标题 [XXXX血糖记录表] (A1:L1 合并)
-    // Row 1: 表头 ['日期', '时效', '时间', '血糖 (耳血)', '打针剂量(u)', '剂量调整', '吃饭时间', '吃饭克数(g)', '尿量', '罐头品牌/批次', '附带东西', '备注']
+    // 5. 构建严格符合模板的数据行和合并单元格
     const sheetData = []
     const merges = []
 
@@ -151,6 +178,12 @@ exports.main = async (event, context) => {
         let dayFoodBrand = ''
         let dayExtras = ''
         
+        group.meals.forEach(ml => {
+          if (ml.urine && !dayUrine) dayUrine = ml.urine
+          if (ml.food_brand && !dayFoodBrand) dayFoodBrand = ml.food_brand
+          if (ml.extras && !dayExtras) dayExtras = ml.extras
+        })
+
         group.insulins.forEach(ins => {
           if (ins.urine && !dayUrine) dayUrine = ins.urine
           if (ins.food_brand && !dayFoodBrand) dayFoodBrand = ins.food_brand
@@ -166,9 +199,16 @@ exports.main = async (event, context) => {
         const eveningBg = group.glucoses.find(g => g !== morningBg && g !== morningPeakBg && ((g.period && g.period.includes('晚针')) || (g.measure_time && parseInt(g.measure_time) >= 16 && parseInt(g.measure_time) < 22)))
         const eveningPeakBg = group.glucoses.find(g => g !== morningBg && g !== morningPeakBg && g !== eveningBg && ((g.period && g.period.includes('5')) || (g.measure_time && (parseInt(g.measure_time) >= 22 || parseInt(g.measure_time) < 5))))
 
+        // 匹配饮食记录到对应时段
+        const morningMeal = group.meals.find(m => (m.period && m.period.includes('早')) || (m.meal_time && parseInt(m.meal_time) < 11))
+        const noonMeal = group.meals.find(m => m !== morningMeal && ((m.period && (m.period.includes('午') || m.period.includes('加'))) || (m.meal_time && parseInt(m.meal_time) >= 11 && parseInt(m.meal_time) < 16)))
+        const eveningMeal = group.meals.find(m => m !== morningMeal && m !== noonMeal && ((m.period && m.period.includes('晚')) || (m.meal_time && parseInt(m.meal_time) >= 16 && parseInt(m.meal_time) < 21)))
+        const nightMeal = group.meals.find(m => m !== morningMeal && m !== noonMeal && m !== eveningMeal && ((m.period && (m.period.includes('夜') || m.period.includes('宵'))) || (m.meal_time && (parseInt(m.meal_time) >= 21 || parseInt(m.meal_time) < 5))))
+
         // 找出剩余未归入 4 大时段的其他记录
         const otherGlucoses = group.glucoses.filter(g => g !== morningBg && g !== morningPeakBg && g !== eveningBg && g !== eveningPeakBg)
         const otherInsulins = group.insulins.filter(i => i !== morningInsulin && i !== eveningInsulin)
+        const otherMeals = group.meals.filter(m => m !== morningMeal && m !== noonMeal && m !== eveningMeal && m !== nightMeal)
 
         // 构建当天必须呈现的行列表
         const dayRows = []
@@ -180,9 +220,9 @@ exports.main = async (event, context) => {
           bg: morningBg ? `${morningBg.bg_value}` : '',
           dose: morningInsulin ? `${morningInsulin.dose}` : '',
           doseAdj: (morningInsulin && morningInsulin.dose_adjustment) || '',
-          mealTime: (morningBg && morningBg.meal_time) || '',
-          foodGrams: (morningBg && morningBg.food_grams) || '',
-          note: (morningInsulin && morningInsulin.note) || (morningBg && morningBg.note) || ''
+          mealTime: (morningMeal && morningMeal.meal_time) || (morningBg && morningBg.meal_time) || '',
+          foodGrams: (morningMeal && morningMeal.food_grams) || (morningBg && morningBg.food_grams) || '',
+          note: (morningMeal && morningMeal.note) || (morningInsulin && morningInsulin.note) || (morningBg && morningBg.note) || ''
         })
 
         // Row 2: 针后5小时 (早)
@@ -192,9 +232,9 @@ exports.main = async (event, context) => {
           bg: morningPeakBg ? `${morningPeakBg.bg_value}` : '',
           dose: '',
           doseAdj: '',
-          mealTime: morningPeakBg ? morningPeakBg.meal_time : '',
-          foodGrams: morningPeakBg ? morningPeakBg.food_grams : '',
-          note: morningPeakBg ? morningPeakBg.note : ''
+          mealTime: (noonMeal && noonMeal.meal_time) || (morningPeakBg && morningPeakBg.meal_time) || '',
+          foodGrams: (noonMeal && noonMeal.food_grams) || (morningPeakBg && morningPeakBg.food_grams) || '',
+          note: (noonMeal && noonMeal.note) || (morningPeakBg && morningPeakBg.note) || ''
         })
 
         // Row 3: 晚针
@@ -204,9 +244,9 @@ exports.main = async (event, context) => {
           bg: eveningBg ? `${eveningBg.bg_value}` : '',
           dose: eveningInsulin ? `${eveningInsulin.dose}` : '',
           doseAdj: (eveningInsulin && eveningInsulin.dose_adjustment) || '',
-          mealTime: (eveningBg && eveningBg.meal_time) || '',
-          foodGrams: (eveningBg && eveningBg.food_grams) || '',
-          note: (eveningInsulin && eveningInsulin.note) || (eveningBg && eveningBg.note) || ''
+          mealTime: (eveningMeal && eveningMeal.meal_time) || (eveningBg && eveningBg.meal_time) || '',
+          foodGrams: (eveningMeal && eveningMeal.food_grams) || (eveningBg && eveningBg.food_grams) || '',
+          note: (eveningMeal && eveningMeal.note) || (eveningInsulin && eveningInsulin.note) || (eveningBg && eveningBg.note) || ''
         })
 
         // Row 4: 针后5小时 (晚)
@@ -216,9 +256,9 @@ exports.main = async (event, context) => {
           bg: eveningPeakBg ? `${eveningPeakBg.bg_value}` : '',
           dose: '',
           doseAdj: '',
-          mealTime: eveningPeakBg ? eveningPeakBg.meal_time : '',
-          foodGrams: eveningPeakBg ? eveningPeakBg.food_grams : '',
-          note: eveningPeakBg ? eveningPeakBg.note : ''
+          mealTime: (nightMeal && nightMeal.meal_time) || (eveningPeakBg && eveningPeakBg.meal_time) || '',
+          foodGrams: (nightMeal && nightMeal.food_grams) || (eveningPeakBg && eveningPeakBg.food_grams) || '',
+          note: (nightMeal && nightMeal.note) || (eveningPeakBg && eveningPeakBg.note) || ''
         })
 
         // 插入其他额外加测或记录
@@ -245,6 +285,19 @@ exports.main = async (event, context) => {
             mealTime: '',
             foodGrams: '',
             note: ins.note || ''
+          })
+        })
+
+        otherMeals.forEach(m => {
+          dayRows.push({
+            timing: m.period || '加餐',
+            time: m.meal_time || '',
+            bg: '',
+            dose: '',
+            doseAdj: '',
+            mealTime: m.meal_time || '',
+            foodGrams: `${m.food_grams}`,
+            note: m.note || ''
           })
         })
 

@@ -1,10 +1,11 @@
 <template>
   <view class="container">
-    <!-- 顶部 Tabs -->
+    <!-- 顶部 Tabs (4项) -->
     <view class="tabs">
       <view class="tab-item" :class="{ active: currentTab === 0 }" @click="switchTab(0)">血糖记录</view>
       <view class="tab-item" :class="{ active: currentTab === 1 }" @click="switchTab(1)">打针记录</view>
-      <view class="tab-item" :class="{ active: currentTab === 2 }" @click="switchTab(2)">体重记录</view>
+      <view class="tab-item" :class="{ active: currentTab === 2 }" @click="switchTab(2)">饮食记录</view>
+      <view class="tab-item" :class="{ active: currentTab === 3 }" @click="switchTab(3)">体重记录</view>
     </view>
 
     <!-- 列表区 -->
@@ -15,7 +16,7 @@
           <view class="card-left">
             <view class="date-time">
               <text class="date">{{ formatDate(item.createTime) }}</text>
-              <text class="time">{{ currentTab === 0 ? item.measure_time : (currentTab === 1 ? item.inject_time : (item.measure_time || '')) }}</text>
+              <text class="time">{{ currentTab === 0 ? item.measure_time : (currentTab === 1 ? item.inject_time : (currentTab === 2 ? item.meal_time : (item.measure_time || ''))) }}</text>
             </view>
             <view class="tags-row">
               <text class="status-tag" v-if="currentTab === 0">{{ item.period || item.status || '常规' }}</text>
@@ -24,15 +25,14 @@
                 <text class="status-tag tag-secondary" v-if="item.dose_adjustment && item.dose_adjustment !== '维持原量'">{{ item.dose_adjustment }}</text>
                 <text class="status-tag tag-type">{{ item.insulin_type }}</text>
               </template>
+              <template v-else-if="currentTab === 2">
+                <text class="status-tag tag-meal">{{ item.period || '进食' }}</text>
+              </template>
               <text class="status-tag" v-else>称重</text>
             </view>
             
-            <!-- 详细进食与辅助信息 -->
-            <view class="extra-info" v-if="currentTab === 0 && (item.meal_time || item.food_grams)">
-              <text class="extra-text">🍽️ 进食: {{ item.meal_time ? item.meal_time + ' ' : '' }}{{ item.food_grams ? item.food_grams + 'g' : '' }}</text>
-            </view>
-
-            <view class="extra-info" v-if="currentTab === 1 && (item.food_brand || item.extras || item.urine)">
+            <!-- 详细饮食与辅助信息 -->
+            <view class="extra-info" v-if="currentTab === 2">
               <text class="extra-text" v-if="item.food_brand">🥫 {{ item.food_brand }}</text>
               <text class="extra-text" v-if="item.extras">💊 {{ item.extras }}</text>
               <text class="extra-text" v-if="item.urine">💧 尿量: {{ item.urine }}</text>
@@ -50,6 +50,10 @@
               <template v-else-if="currentTab === 1">
                 <text class="value-text type-insulin">{{ item.dose }}</text>
                 <text class="unit">U</text>
+              </template>
+              <template v-else-if="currentTab === 2">
+                <text class="value-text type-meal">{{ item.food_grams }}</text>
+                <text class="unit">g</text>
               </template>
               <template v-else>
                 <text class="value-text type-weight">{{ item.weight_value }}</text>
@@ -87,13 +91,20 @@ import { ref } from 'vue'
 import { onLoad, onShow, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
 import { callApi } from '@/utils/api'
 
-const currentTab = ref(0) // 0: 血糖, 1: 打针, 2: 体重
+const currentTab = ref(0) // 0: 血糖, 1: 打针, 2: 饮食, 3: 体重
 const records = ref<any[]>([])
 const isLoading = ref(false)
 const isRefreshing = ref(false)
 const hasMore = ref(true)
 
 const PAGE_SIZE = 20
+
+const getCollectionName = () => {
+  if (currentTab.value === 0) return 'blood_glucose'
+  if (currentTab.value === 1) return 'insulin_records'
+  if (currentTab.value === 2) return 'meal_records'
+  return 'weight_records'
+}
 
 onLoad(() => {
   loadData(true)
@@ -158,7 +169,7 @@ const loadData = async (isReset: boolean) => {
 
   try {
     const catId = uni.getStorageSync('currentCatId') || 'default'
-    const collectionName = currentTab.value === 0 ? 'blood_glucose' : (currentTab.value === 1 ? 'insulin_records' : 'weight_records')
+    const collectionName = getCollectionName()
     
     const res = await callApi('getRecords', {
       catId,
@@ -196,7 +207,7 @@ const deleteRecord = async (id: string) => {
   uni.showLoading({ title: '删除中' })
   try {
     const catId = uni.getStorageSync('currentCatId') || 'default'
-    const collectionName = currentTab.value === 0 ? 'blood_glucose' : (currentTab.value === 1 ? 'insulin_records' : 'weight_records')
+    const collectionName = getCollectionName()
     
     await callApi('deleteRecord', {
       catId,
@@ -332,6 +343,11 @@ const getBgColorClass = (value: number) => {
   background: #EBF5FB;
   color: #2980B9;
 }
+.tag-meal {
+  background: #FEF5E7;
+  color: #D35400;
+}
+.type-meal { color: #E67E22; }
 .extra-info {
   margin-bottom: 8rpx;
   display: flex;

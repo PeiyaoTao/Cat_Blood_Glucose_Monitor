@@ -49,43 +49,16 @@
         </picker>
       </view>
 
-      <!-- 饮食与健康追踪（与就诊表对齐） -->
-      <view class="section-title">当日饮食与健康追踪（选填）</view>
-
       <view class="form-group">
-        <text class="label">排尿情况 / 尿量 (选填)</text>
-        <picker :range="urineOptions" @change="onUrineChange" :value="urineIndex">
-          <view class="picker-view">
-            {{ urineOptions[urineIndex] }}
-            <text class="icon-arrow">▼</text>
-          </view>
-        </picker>
-      </view>
-
-      <view class="form-group">
-        <text class="label">罐头品牌 / 批次 (选填)</text>
+        <text class="label">备注 (注射部位、配合度等)</text>
         <view class="input-wrap">
-          <input type="text" v-model="formData.food_brand" placeholder="例如: 巅峰牛肉 20260101 / K9羊肉" />
-        </view>
-      </view>
-
-      <view class="form-group">
-        <text class="label">附带东西 / 补剂用药 (选填)</text>
-        <view class="input-wrap">
-          <input type="text" v-model="formData.extras" placeholder="例如: 益生菌、鱼油、辅酶Q10、补水30ml" />
-        </view>
-      </view>
-
-      <view class="form-group">
-        <text class="label">备注 (选填)</text>
-        <view class="input-wrap">
-          <input type="text" v-model="formData.note" placeholder="例如: 左侧颈部皮下，吃得很好" />
+          <input type="text" v-model="formData.note" placeholder="例如: 左侧颈部皮下，打针配合良好" />
         </view>
       </view>
     </view>
 
     <button class="btn btn-primary submit-btn" :loading="isSubmitting" @click="submitRecord">
-      保存记录
+      保存打针记录
     </button>
   </view>
 </template>
@@ -111,16 +84,6 @@ const adjustIndex = ref(0)
 const insulinOptions = ['甘精胰岛素 (Glargine)', '地特胰岛素 (Detemir)', '中效胰岛素 (NPH)', '其他']
 const insulinIndex = ref(0)
 
-const urineOptions = [
-  '未记录',
-  '正常 (3~4团)',
-  '偏多 (>5团)',
-  '偏少 (<2团)',
-  '多饮多尿',
-  '正常'
-]
-const urineIndex = ref(0)
-
 const isSubmitting = ref(false)
 
 const now = new Date()
@@ -138,8 +101,6 @@ if (hour >= 5 && hour < 14) {
 const formData = ref({
   dose: '',
   time: `${currentHour}:${currentMinute}`,
-  food_brand: '',
-  extras: '',
   note: ''
 })
 
@@ -153,10 +114,6 @@ const onAdjustChange = (e: any) => {
 
 const onInsulinChange = (e: any) => {
   insulinIndex.value = e.detail.value
-}
-
-const onUrineChange = (e: any) => {
-  urineIndex.value = e.detail.value
 }
 
 const onTimeChange = (e: any) => {
@@ -175,7 +132,6 @@ const submitRecord = async () => {
   try {
     const periodName = periodOptions[periodIndex.value]
     const doseAdj = adjustIndex.value === 0 ? '维持原量' : adjustOptions[adjustIndex.value]
-    const urineVal = urineIndex.value === 0 ? '' : urineOptions[urineIndex.value]
 
     const recordData = {
       cat_id: uni.getStorageSync('currentCatId') || 'default',
@@ -184,9 +140,6 @@ const submitRecord = async () => {
       dose_adjustment: doseAdj,
       insulin_type: insulinOptions[insulinIndex.value],
       inject_time: formData.value.time,
-      urine: urineVal,
-      food_brand: formData.value.food_brand || '',
-      extras: formData.value.extras || '',
       note: formData.value.note,
       createTime: Date.now()
     }
@@ -222,14 +175,6 @@ const submitRecord = async () => {
   color: var(--text-sub);
   margin-bottom: 16rpx;
   display: block;
-}
-.section-title {
-  font-size: 28rpx;
-  font-weight: 600;
-  color: var(--text-main);
-  margin: 36rpx 0 20rpx 0;
-  padding-top: 24rpx;
-  border-top: 2rpx dashed #EAEDED;
 }
 .grid-2 {
   display: grid;
