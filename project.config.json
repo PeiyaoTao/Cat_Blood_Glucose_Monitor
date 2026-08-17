@@ -1,6 +1,6 @@
 {
   "description": "项目配置文件。",
-  "miniprogramRoot": "frontend/dist/dev/mp-weixin/",
+  "miniprogramRoot": "frontend/dist/build/mp-weixin/",
   "cloudfunctionRoot": "cloudfunctions/",
   "packOptions": {
     "ignore": [],
