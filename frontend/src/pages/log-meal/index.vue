@@ -8,12 +8,22 @@
         </view>
       </view>
 
+      <view class="form-group">
+        <text class="label">餐次阶段</text>
+        <picker :range="mealPeriodOptions" @change="onPeriodChange" :value="periodIndex">
+          <view class="picker-view">
+            {{ mealPeriodOptions[periodIndex] }}
+            <text class="icon-arrow">▼</text>
+          </view>
+        </picker>
+      </view>
+
       <view class="grid-2">
         <view class="form-group">
-          <text class="label">餐次阶段</text>
-          <picker :range="mealPeriodOptions" @change="onPeriodChange" :value="periodIndex">
+          <text class="label">进食日期</text>
+          <picker mode="date" @change="onDateChange" :value="formData.date">
             <view class="picker-view">
-              {{ mealPeriodOptions[periodIndex] }}
+              {{ formData.date }}
               <text class="icon-arrow">▼</text>
             </view>
           </picker>
@@ -29,36 +39,58 @@
         </view>
       </view>
 
+      <!-- 罐头品牌/批次 -->
       <view class="form-group">
-        <text class="label">罐头品牌 / 批次 (选填)</text>
+        <view class="label-row">
+          <text class="label">罐头品牌 / 批次 (选填)</text>
+          <text class="save-link" v-if="formData.food_brand.trim()" @click="saveCustomFoodBrand">
+            ⭐️ 保存为常用罐头
+          </text>
+        </view>
         <view class="input-wrap">
           <input type="text" v-model="formData.food_brand" placeholder="例如: 巅峰牛肉 20260101 / K9羊肉" />
         </view>
         <!-- 快捷食物标签 -->
         <view class="quick-tags">
-          <text class="q-tag" v-for="tag in commonFoodTags" :key="tag" @click="formData.food_brand = tag">{{ tag }}</text>
+          <text 
+            class="q-tag" 
+            :class="{ active: formData.food_brand === tag, 'is-custom': isCustomFood(tag) }" 
+            v-for="tag in allFoodTags" 
+            :key="tag" 
+            @click="formData.food_brand = tag"
+            @longpress="onLongPressFood(tag)"
+          >
+            {{ tag }}
+          </text>
         </view>
+        <text class="tag-hint" v-if="customFoodList.length > 0">提示：长按自定义罐头标签可弹出删除</text>
       </view>
 
+      <!-- 附带东西/补剂 -->
       <view class="form-group">
-        <text class="label">附带东西 / 补剂用药 (选填)</text>
+        <view class="label-row">
+          <text class="label">附带东西 / 补剂用药 (选填)</text>
+          <text class="save-link" v-if="formData.extras.trim()" @click="saveCustomExtras">
+            ⭐️ 保存为常用补剂
+          </text>
+        </view>
         <view class="input-wrap">
           <input type="text" v-model="formData.extras" placeholder="例如: 益生菌、鱼油、辅酶Q10、皮下补水30ml" />
         </view>
         <!-- 快捷补剂标签 -->
         <view class="quick-tags">
-          <text class="q-tag" v-for="tag in commonExtraTags" :key="tag" @click="appendExtra(tag)">+ {{ tag }}</text>
+          <text 
+            class="q-tag" 
+            :class="{ 'is-custom': isCustomExtra(tag) }"
+            v-for="tag in allExtraTags" 
+            :key="tag" 
+            @click="appendExtra(tag)"
+            @longpress="onLongPressExtra(tag)"
+          >
+            + {{ tag }}
+          </text>
         </view>
-      </view>
-
-      <view class="form-group">
-        <text class="label">排尿情况 / 尿量 (选填)</text>
-        <picker :range="urineOptions" @change="onUrineChange" :value="urineIndex">
-          <view class="picker-view">
-            {{ urineOptions[urineIndex] }}
-            <text class="icon-arrow">▼</text>
-          </view>
-        </picker>
+        <text class="tag-hint" v-if="customExtraList.length > 0">提示：长按自定义补剂标签可弹出删除</text>
       </view>
 
       <view class="form-group">
@@ -76,31 +108,112 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import { callApi } from '@/utils/api'
+import { ref, computed, onMounted } from 'vue'
+import { callApi, getLocalTodayDate, getLocalCurrentTime, makeLocalTimestamp, safeNavigateBack } from '@/utils/api'
 
 const mealPeriodOptions = ['早餐 (早针餐)', '午餐/加餐', '晚餐 (晚针餐)', '夜宵/夜间加餐', '常规喂食']
 const periodIndex = ref(0)
 
-const urineOptions = [
-  '未记录',
-  '正常 (3~4团)',
-  '偏多 (>5团)',
-  '偏少 (<2团)',
-  '多饮多尿',
-  '正常'
-]
-const urineIndex = ref(0)
+const defaultFoodTags = ['巅峰牛肉', 'K9羊肉', '小李子', 'RAWZ兔肉', '冻干主食', '处方低碳粮']
+const customFoodList = ref<string[]>([])
 
-const commonFoodTags = ['主食罐头', '生骨肉/熟自制', '冻干主食', '处方低碳粮']
-const commonExtraTags = ['益生菌', '鱼油', '皮下补水', '辅酶Q10', '维生素B']
+const defaultExtraTags = ['益生菌', '鱼油', '皮下补水', '辅酶Q10', '维生素B', '乳果糖', '磷结合剂']
+const customExtraList = ref<string[]>([])
+
+const loadSavedPresets = () => {
+  const savedFoods = uni.getStorageSync('custom_food_brands')
+  if (savedFoods && Array.isArray(savedFoods)) {
+    customFoodList.value = savedFoods
+  }
+  const savedExtras = uni.getStorageSync('custom_extras')
+  if (savedExtras && Array.isArray(savedExtras)) {
+    customExtraList.value = savedExtras
+  }
+}
+
+onMounted(() => {
+  loadSavedPresets()
+})
+
+const allFoodTags = computed(() => {
+  return Array.from(new Set([...customFoodList.value, ...defaultFoodTags]))
+})
+
+const allExtraTags = computed(() => {
+  return Array.from(new Set([...customExtraList.value, ...defaultExtraTags]))
+})
+
+const isCustomFood = (tag: string) => customFoodList.value.includes(tag)
+const isCustomExtra = (tag: string) => customExtraList.value.includes(tag)
+
+const saveCustomFoodBrand = () => {
+  const brand = formData.value.food_brand.trim()
+  if (!brand) return
+  if (!customFoodList.value.includes(brand)) {
+    const updated = [brand, ...customFoodList.value]
+    customFoodList.value = updated
+    uni.setStorageSync('custom_food_brands', updated)
+    uni.showToast({ title: '已保存为常用罐头', icon: 'success' })
+  } else {
+    uni.showToast({ title: '该选项已在常用列表中', icon: 'none' })
+  }
+}
+
+const onLongPressFood = (tag: string) => {
+  if (!customFoodList.value.includes(tag)) return
+  uni.showModal({
+    title: '删除常用罐头',
+    content: `确定要删除自定义罐头「${tag}」吗？`,
+    confirmText: '删除',
+    confirmColor: '#E74C3C',
+    success: (res) => {
+      if (res.confirm) {
+        const updated = customFoodList.value.filter(item => item !== tag)
+        customFoodList.value = updated
+        uni.setStorageSync('custom_food_brands', updated)
+        if (formData.value.food_brand === tag) formData.value.food_brand = ''
+        uni.showToast({ title: '已删除常用罐头', icon: 'success' })
+      }
+    }
+  })
+}
+
+const saveCustomExtras = () => {
+  const extra = formData.value.extras.trim()
+  if (!extra) return
+  if (!customExtraList.value.includes(extra)) {
+    const updated = [extra, ...customExtraList.value]
+    customExtraList.value = updated
+    uni.setStorageSync('custom_extras', updated)
+    uni.showToast({ title: '已保存为常用补剂', icon: 'success' })
+  } else {
+    uni.showToast({ title: '该选项已在常用列表中', icon: 'none' })
+  }
+}
+
+const onLongPressExtra = (tag: string) => {
+  if (!customExtraList.value.includes(tag)) return
+  uni.showModal({
+    title: '删除常用补剂',
+    content: `确定要删除自定义补剂「${tag}」吗？`,
+    confirmText: '删除',
+    confirmColor: '#E74C3C',
+    success: (res) => {
+      if (res.confirm) {
+        const updated = customExtraList.value.filter(item => item !== tag)
+        customExtraList.value = updated
+        uni.setStorageSync('custom_extras', updated)
+        uni.showToast({ title: '已删除常用补剂', icon: 'success' })
+      }
+    }
+  })
+}
 
 const isSubmitting = ref(false)
 
-const now = new Date()
-const hour = now.getHours()
-const currentHour = hour.toString().padStart(2, '0')
-const currentMinute = now.getMinutes().toString().padStart(2, '0')
+const currentDate = getLocalTodayDate()
+const currentTime = getLocalCurrentTime()
+const hour = new Date().getHours()
 
 // 自动根据时间预设餐次
 if (hour >= 5 && hour < 11) {
@@ -115,7 +228,8 @@ if (hour >= 5 && hour < 11) {
 
 const formData = ref({
   food_grams: '',
-  time: `${currentHour}:${currentMinute}`,
+  date: currentDate,
+  time: currentTime,
   food_brand: '',
   extras: '',
   note: ''
@@ -125,8 +239,8 @@ const onPeriodChange = (e: any) => {
   periodIndex.value = e.detail.value
 }
 
-const onUrineChange = (e: any) => {
-  urineIndex.value = e.detail.value
+const onDateChange = (e: any) => {
+  formData.value.date = e.detail.value
 }
 
 const onTimeChange = (e: any) => {
@@ -152,29 +266,29 @@ const submitRecord = async () => {
   
   try {
     const periodName = mealPeriodOptions[periodIndex.value]
-    const urineVal = urineIndex.value === 0 ? '' : urineOptions[urineIndex.value]
+    const recordDateTime = makeLocalTimestamp(formData.value.date, formData.value.time)
 
     const recordData = {
       cat_id: uni.getStorageSync('currentCatId') || 'default',
       food_grams: numValue,
       period: periodName,
+      record_date: formData.value.date,
       meal_time: formData.value.time,
       food_brand: formData.value.food_brand || '',
       extras: formData.value.extras || '',
-      urine: urineVal,
       note: formData.value.note,
-      createTime: Date.now()
+      createTime: recordDateTime
     }
     
     await callApi('addRecord', { type: 'meal_records', recordData })
     
     uni.showToast({ title: '饮食记录成功', icon: 'success' })
     setTimeout(() => {
-      uni.navigateBack()
+      safeNavigateBack()
     }, 1500)
   } catch (err: any) {
     console.error(err)
-    uni.showToast({ title: '提交失败:' + err.message, icon: 'none', duration: 3000 })
+    uni.showToast({ title: '提交失败:' + err.message, icon: 'none' })
   } finally {
     isSubmitting.value = false
   }
@@ -182,57 +296,82 @@ const submitRecord = async () => {
 </script>
 
 <style scoped>
+.container {
+  padding: 32rpx;
+  min-height: 100vh;
+  background-color: var(--bg-color);
+  box-sizing: border-box;
+}
+.card {
+  background: #FFFFFF;
+  border-radius: 24rpx;
+  padding: 40rpx 32rpx;
+  box-shadow: 0 4rpx 16rpx rgba(0,0,0,0.03);
+  margin-bottom: 40rpx;
+}
 .form-group {
   margin-bottom: 32rpx;
 }
 .required {
   color: #E74C3C;
 }
+.label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16rpx;
+}
 .label {
   font-size: 28rpx;
   color: var(--text-sub);
-  margin-bottom: 16rpx;
+  font-weight: 500;
   display: block;
+}
+.save-link {
+  font-size: 24rpx;
+  color: #D97706;
+  font-weight: 600;
+}
+.huge-input {
+  height: 120rpx;
+}
+.bg-input {
+  font-size: 64rpx;
+  font-weight: 700;
+  color: #D69E2E;
+  text-align: center;
+  height: 100%;
+}
+.picker-view {
+  background: #F8F9FA;
+  border-radius: 16rpx;
+  padding: 24rpx 32rpx;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 30rpx;
+  color: var(--text-main);
+}
+.icon-arrow {
+  color: #BDC3C7;
+  font-size: 24rpx;
+}
+.input-wrap {
+  background: #F8F9FA;
+  border-radius: 16rpx;
+  padding: 24rpx 32rpx;
+  display: flex;
+  align-items: center;
+}
+.input-wrap input {
+  width: 100%;
+  font-size: 30rpx;
+  color: var(--text-main);
 }
 .grid-2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 20rpx;
-}
-.input-wrap {
-  background: #F7F9FC;
-  border-radius: 16rpx;
-  padding: 24rpx 32rpx;
-}
-.input-wrap input {
-  font-size: 32rpx;
-  color: var(--text-main);
-  width: 100%;
-}
-.huge-input {
-  padding: 32rpx;
-}
-.bg-input {
-  font-size: 80rpx !important;
-  font-weight: 800;
-  text-align: center;
-  height: 120rpx;
-  line-height: 120rpx;
-  color: #E67E22;
-}
-.picker-view {
-  background: #F7F9FC;
-  border-radius: 16rpx;
-  padding: 24rpx 32rpx;
-  font-size: 32rpx;
-  color: var(--text-main);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.icon-arrow {
-  color: #BDBDBD;
-  font-family: monospace;
 }
 .quick-tags {
   display: flex;
@@ -241,20 +380,34 @@ const submitRecord = async () => {
   margin-top: 16rpx;
 }
 .q-tag {
-  font-size: 22rpx;
-  color: #7F8C8D;
+  font-size: 24rpx;
+  padding: 8rpx 20rpx;
   background: #F4F6F7;
-  padding: 6rpx 16rpx;
+  color: #5D6D7E;
   border-radius: 100rpx;
   transition: all 0.2s;
 }
-.q-tag:active {
-  background: #EAECEE;
-  color: #2C3E50;
+.q-tag.active {
+  background: #FEF3C7;
+  color: #B45309;
+  font-weight: 600;
+}
+.q-tag.is-custom {
+  border: 1rpx dashed #F59E0B;
+}
+.tag-hint {
+  font-size: 20rpx;
+  color: #A0AEC0;
+  margin-top: 8rpx;
+  display: block;
 }
 .submit-btn {
-  height: 100rpx;
-  margin-top: 40rpx;
-  background: linear-gradient(135deg, #F39C12, #E67E22);
+  width: 100%;
+  height: 96rpx;
+  line-height: 96rpx;
+  border-radius: 48rpx;
+  font-size: 32rpx;
+  font-weight: 700;
+  background: linear-gradient(135deg, #D69E2E, #ECC94B);
 }
 </style>

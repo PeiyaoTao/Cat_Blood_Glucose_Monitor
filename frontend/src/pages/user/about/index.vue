@@ -3,7 +3,7 @@
     <view class="logo-wrap">
       <view class="logo-icon"></view>
       <text class="app-name">猫咪控糖日记</text>
-      <text class="version">v1.0.0</text>
+      <text class="version">v1.3.3</text>
     </view>
     
     <view class="card">

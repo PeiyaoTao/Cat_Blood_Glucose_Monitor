@@ -1,11 +1,12 @@
 <template>
   <view class="container">
-    <!-- 顶部 Tabs (4项) -->
+    <!-- 顶部 Tabs (5项) -->
     <view class="tabs">
       <view class="tab-item" :class="{ active: currentTab === 0 }" @click="switchTab(0)">血糖记录</view>
       <view class="tab-item" :class="{ active: currentTab === 1 }" @click="switchTab(1)">打针记录</view>
       <view class="tab-item" :class="{ active: currentTab === 2 }" @click="switchTab(2)">饮食记录</view>
-      <view class="tab-item" :class="{ active: currentTab === 3 }" @click="switchTab(3)">体重记录</view>
+      <view class="tab-item" :class="{ active: currentTab === 3 }" @click="switchTab(3)">排泄记录</view>
+      <view class="tab-item" :class="{ active: currentTab === 4 }" @click="switchTab(4)">体重记录</view>
     </view>
 
     <!-- 列表区 -->
@@ -15,8 +16,8 @@
           
           <view class="card-left">
             <view class="date-time">
-              <text class="date">{{ formatDate(item.createTime) }}</text>
-              <text class="time">{{ currentTab === 0 ? item.measure_time : (currentTab === 1 ? item.inject_time : (currentTab === 2 ? item.meal_time : (item.measure_time || ''))) }}</text>
+              <text class="date">{{ formatDate(item.record_date || item.createTime) }}</text>
+              <text class="time">{{ currentTab === 0 ? item.measure_time : (currentTab === 1 ? item.inject_time : (currentTab === 2 ? item.meal_time : (currentTab === 3 ? (item.record_time || item.measure_time) : (item.measure_time || '')))) }}</text>
             </view>
             <view class="tags-row">
               <text class="status-tag" v-if="currentTab === 0">{{ item.period || item.status || '常规' }}</text>
@@ -28,14 +29,35 @@
               <template v-else-if="currentTab === 2">
                 <text class="status-tag tag-meal">{{ item.period || '进食' }}</text>
               </template>
+              <template v-else-if="currentTab === 3">
+                <text class="status-tag tag-excretion">{{ item.urine || '排尿正常' }}</text>
+                <text class="status-tag tag-secondary" v-if="item.stool_status">{{ item.stool_status }}</text>
+              </template>
               <text class="status-tag" v-else>称重</text>
             </view>
             
             <!-- 详细饮食与辅助信息 -->
             <view class="extra-info" v-if="currentTab === 2">
-              <text class="extra-text" v-if="item.food_brand">🥫 {{ item.food_brand }}</text>
-              <text class="extra-text" v-if="item.extras">💊 {{ item.extras }}</text>
-              <text class="extra-text" v-if="item.urine">💧 尿量: {{ item.urine }}</text>
+              <view class="extra-row" v-if="item.food_brand">
+                <text class="extra-label">罐头</text>
+                <text class="extra-content">{{ item.food_brand }}</text>
+              </view>
+              <view class="extra-row" v-if="item.extras">
+                <text class="extra-label">附带</text>
+                <text class="extra-content">{{ item.extras }}</text>
+              </view>
+              <view class="extra-row" v-if="item.urine">
+                <text class="extra-label">尿量</text>
+                <text class="extra-content">{{ item.urine }}</text>
+              </view>
+            </view>
+
+            <!-- 排泄细节 (Tab 3) -->
+            <view class="extra-info" v-if="currentTab === 3">
+              <view class="extra-row" v-if="item.stool_color">
+                <text class="extra-label">颜色</text>
+                <text class="extra-content">{{ item.stool_color }}</text>
+              </view>
             </view>
 
             <text class="note-text" v-if="item.note">{{ item.note }}</text>
@@ -54,6 +76,9 @@
               <template v-else-if="currentTab === 2">
                 <text class="value-text type-meal">{{ item.food_grams }}</text>
                 <text class="unit">g</text>
+              </template>
+              <template v-else-if="currentTab === 3">
+                <text class="value-text type-excretion">{{ item.stool_status ? '已排便' : '护理' }}</text>
               </template>
               <template v-else>
                 <text class="value-text type-weight">{{ item.weight_value }}</text>
@@ -91,7 +116,7 @@ import { ref } from 'vue'
 import { onLoad, onShow, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
 import { callApi } from '@/utils/api'
 
-const currentTab = ref(0) // 0: 血糖, 1: 打针, 2: 饮食, 3: 体重
+const currentTab = ref(0) // 0: 血糖, 1: 打针, 2: 饮食, 3: 排泄, 4: 体重
 const records = ref<any[]>([])
 const isLoading = ref(false)
 const isRefreshing = ref(false)
@@ -103,40 +128,56 @@ const getCollectionName = () => {
   if (currentTab.value === 0) return 'blood_glucose'
   if (currentTab.value === 1) return 'insulin_records'
   if (currentTab.value === 2) return 'meal_records'
+  if (currentTab.value === 3) return 'excretion_records'
   return 'weight_records'
 }
 
+const targetMin = ref(4.0)
+const targetMax = ref(15.0)
+
+const fetchCatTarget = async () => {
+  try {
+    const res = await callApi('getCats')
+    if (res.data && res.data.length > 0) {
+      const currentCatId = uni.getStorageSync('currentCatId')
+      let cat = res.data.find((c: any) => c._id === currentCatId)
+      if (!cat) cat = res.data[0]
+      if (cat) {
+        if (cat.targetMin !== undefined && !isNaN(Number(cat.targetMin))) {
+          targetMin.value = Number(cat.targetMin)
+        }
+        if (cat.targetMax !== undefined && !isNaN(Number(cat.targetMax))) {
+          targetMax.value = Number(cat.targetMax)
+        }
+      }
+    }
+  } catch (e) {
+    console.error('获取猫咪控糖目标失败', e)
+  }
+}
+
 onLoad(() => {
+  fetchCatTarget()
   loadData(true)
 })
 
 onShow(() => {
+  fetchCatTarget()
   if (records.value.length > 0) {
     loadData(true)
   }
 })
 
 onShareAppMessage(() => {
-  const userInfoStr = uni.getStorageSync('userInfo')
-  let openid = ''
-  if (userInfoStr) {
-    openid = JSON.parse(userInfoStr).openid || ''
-  }
   return {
-    title: '猫咪血糖监测日记',
-    path: openid ? `/pages/index/index?inviter=${openid}` : '/pages/index/index'
+    title: '猫咪控糖日记 - 专业的猫咪糖尿病记录与健康管理助手',
+    path: '/pages/index/index'
   }
 })
 
 onShareTimeline(() => {
-  const userInfoStr = uni.getStorageSync('userInfo')
-  let openid = ''
-  if (userInfoStr) {
-    openid = JSON.parse(userInfoStr).openid || ''
-  }
   return {
-    title: '猫咪血糖监测日记',
-    query: openid ? `inviter=${openid}` : ''
+    title: '猫咪控糖日记 - 专业的猫咪糖尿病记录与健康管理助手'
   }
 })
 
@@ -148,6 +189,7 @@ const switchTab = (index: number) => {
 
 const onRefresh = async () => {
   isRefreshing.value = true
+  await fetchCatTarget()
   await loadData(true)
   isRefreshing.value = false
 }
@@ -226,14 +268,19 @@ const deleteRecord = async (id: string) => {
   }
 }
 
-const formatDate = (dateObj: any) => {
-  if (!dateObj) return '未知日期'
+const formatDate = (dateVal: any) => {
+  if (!dateVal) return '未知日期'
+  if (typeof dateVal === 'string' && dateVal.includes('-') && dateVal.length === 10) {
+    const [_, m, d] = dateVal.split('-')
+    return `${parseInt(m)}月${parseInt(d)}日`
+  }
   let d: Date
-  // Handle if WeChat SDK returns an object with a timestamp or a Date
-  if (dateObj instanceof Date) {
-    d = dateObj
-  } else if (typeof dateObj === 'number' || typeof dateObj === 'string') {
-    d = new Date(dateObj)
+  if (dateVal instanceof Date) {
+    d = dateVal
+  } else if (typeof dateVal === 'number') {
+    d = new Date(dateVal)
+  } else if (typeof dateVal === 'string') {
+    d = new Date(dateVal.replace(/-/g, '/'))
   } else {
     return '未知日期'
   }
@@ -241,9 +288,14 @@ const formatDate = (dateObj: any) => {
 }
 
 const getBgColorClass = (value: number) => {
-  if (value < 4.0) return 'text-danger'
-  if (value > 15.0) return 'text-warning'
-  return 'text-normal'
+  const min = targetMin.value
+  const max = targetMax.value
+  const warningMax = max * 1.3 // 动态超标 30% 缓冲阈值
+
+  if (value < min) return 'text-danger' // 🔴 红色: 低于自定义目标下限 (低血糖急症)
+  if (value <= max) return 'text-normal' // 🟢 绿色: 落在自定义安全目标区间 [targetMin, targetMax] 内
+  if (value <= warningMax) return 'text-warning' // 🟡 黄色: 超出目标上限 30% 以内 (轻中度偏高，需观察)
+  return 'text-danger' // 🔴 红色: 超出目标上限 30% 以上 (严重高血糖预警)
 }
 </script>
 
@@ -347,21 +399,37 @@ const getBgColorClass = (value: number) => {
   background: #FEF5E7;
   color: #D35400;
 }
+.tag-excretion {
+  background: #E8F8F5;
+  color: #16A085;
+}
 .type-meal { color: #E67E22; }
+.type-excretion { color: #16A085; font-size: 28rpx; }
 .extra-info {
   margin-bottom: 8rpx;
   display: flex;
   flex-direction: column;
-  gap: 4rpx;
+  gap: 8rpx;
 }
-.extra-text {
-  font-size: 22rpx;
+.extra-row {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  font-size: 24rpx;
+}
+.extra-label {
+  font-size: 20rpx;
   color: #7F8C8D;
-  background: #F8F9FA;
-  padding: 4rpx 12rpx;
+  background: #F2F4F4;
+  padding: 2rpx 10rpx;
   border-radius: 6rpx;
-  display: inline-block;
-  width: fit-content;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+.extra-content {
+  color: var(--text-main);
+  font-size: 24rpx;
+  font-weight: 500;
 }
 .note-text {
   font-size: 24rpx;

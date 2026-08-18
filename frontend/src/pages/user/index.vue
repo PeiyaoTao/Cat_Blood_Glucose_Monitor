@@ -202,15 +202,14 @@ const copyId = () => {
 
 onShareAppMessage(() => {
   return {
-    title: '猫咪血糖监测日记',
-    path: userInfo.value.openid ? `/pages/index/index?inviter=${userInfo.value.openid}` : '/pages/index/index'
+    title: '猫咪控糖日记 - 专业的猫咪糖尿病记录与健康管理助手',
+    path: '/pages/index/index'
   }
 })
 
 onShareTimeline(() => {
   return {
-    title: '猫咪血糖监测日记',
-    query: userInfo.value.openid ? `inviter=${userInfo.value.openid}` : ''
+    title: '猫咪控糖日记 - 专业的猫咪糖尿病记录与健康管理助手'
   }
 })
 

@@ -193,6 +193,7 @@ exports.main = async (event, context) => {
         await db.collection('blood_glucose').where({ cat_id: catId }).remove()
         await db.collection('insulin_records').where({ cat_id: catId }).remove()
         await db.collection('meal_records').where({ cat_id: catId }).remove()
+        await db.collection('excretion_records').where({ cat_id: catId }).remove()
         await db.collection('weight_records').where({ cat_id: catId }).remove()
         
         return { success: true }

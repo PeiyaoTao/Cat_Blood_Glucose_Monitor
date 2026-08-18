@@ -84,16 +84,43 @@ const exportExcel = async (days: number) => {
         fileID: res.result.fileID,
         success: (downloadRes: any) => {
           uni.hideLoading()
+          const customFileName = res.result.fileName || '血糖报告.xlsx'
           // @ts-ignore
-          wx.openDocument({
-            filePath: downloadRes.tempFilePath,
-            showMenu: true, // 允许用户转发
-            success: function () {
-              console.log('打开文档成功')
+          const fs = wx.getFileSystemManager()
+          // @ts-ignore
+          const targetPath = `${wx.env.USER_DATA_PATH}/${customFileName}`
+
+          fs.copyFile({
+            srcPath: downloadRes.tempFilePath,
+            destPath: targetPath,
+            success: () => {
+              // @ts-ignore
+              wx.openDocument({
+                filePath: targetPath,
+                fileType: 'xlsx',
+                showMenu: true,
+                success: function () {
+                  console.log('打开文档成功:', customFileName)
+                },
+                fail: function (openErr: any) {
+                  console.error('打开重命名文件失败，回退打开临时文件', openErr)
+                  // @ts-ignore
+                  wx.openDocument({
+                    filePath: downloadRes.tempFilePath,
+                    fileType: 'xlsx',
+                    showMenu: true
+                  })
+                }
+              })
             },
-            fail: function (err: any) {
-              uni.showToast({ title: '打开失败，请稍后重试', icon: 'none' })
-              console.error(err)
+            fail: (copyErr: any) => {
+              console.error('复制重命名文件失败，使用原路径打开', copyErr)
+              // @ts-ignore
+              wx.openDocument({
+                filePath: downloadRes.tempFilePath,
+                fileType: 'xlsx',
+                showMenu: true
+              })
             }
           })
         },

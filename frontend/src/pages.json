@@ -29,6 +29,13 @@
 			}
 		},
 		{
+			"path": "pages/log-excretion/index",
+			"style": {
+				"navigationBarTitleText": "记排泄",
+				"navigationBarBackgroundColor": "#F7F9FC"
+			}
+		},
+		{
 			"path": "pages/log-weight/index",
 			"style": {
 				"navigationBarTitleText": "记录体重",

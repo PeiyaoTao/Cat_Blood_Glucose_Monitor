@@ -16,15 +16,15 @@
       </view>
     </view>
 
-    <!-- 快捷记录卡片 (2x2 黄金网格布局) -->
+    <!-- 快捷记录卡片 (5大黄金功能网格) -->
     <view class="action-card card">
       <view class="card-title">今日操作</view>
       <view class="action-grid">
-        <view class="action-btn-item btn-glucose" @click="handleLogGlucose">
+        <view class="action-btn-item btn-glucose full-width" @click="handleLogGlucose">
           <view class="action-icon icon-blood-lg"></view>
           <view class="action-info">
             <text class="action-main-text">记血糖</text>
-            <text class="action-sub-text">测耳血数值</text>
+            <text class="action-sub-text">测耳血数值 · 每日核心控糖指标</text>
           </view>
         </view>
         <view class="action-btn-item btn-insulin" @click="handleLogInsulin">
@@ -38,7 +38,14 @@
           <view class="action-icon icon-meal-lg"></view>
           <view class="action-info">
             <text class="action-main-text">记饮食</text>
-            <text class="action-sub-text">罐头/克数/尿量</text>
+            <text class="action-sub-text">罐头/主食/加餐</text>
+          </view>
+        </view>
+        <view class="action-btn-item btn-excretion" @click="handleLogExcretion">
+          <view class="action-icon icon-excretion-lg"></view>
+          <view class="action-info">
+            <text class="action-main-text">记排泄</text>
+            <text class="action-sub-text">尿量/便便健康</text>
           </view>
         </view>
         <view class="action-btn-item btn-weight" @click="handleLogWeight">
@@ -64,6 +71,7 @@
           type="line"
           canvasId="glucoseChart"
           :canvas2d="true"
+          :ontouch="true"
           :opts="chartOpts"
           :chartData="chartData"
         />
@@ -147,28 +155,15 @@ onLoad(async (options: any) => {
 })
 
 onShareAppMessage(() => {
-  const userInfoStr = uni.getStorageSync('userInfo')
-  let openid = ''
-  if (userInfoStr) {
-    openid = JSON.parse(userInfoStr).openid || ''
-  }
-  
   return {
-    title: '猫咪血糖监测日记',
-    path: openid ? `/pages/index/index?inviter=${openid}` : '/pages/index/index'
+    title: '猫咪控糖日记 - 专业的猫咪糖尿病记录与健康管理助手',
+    path: '/pages/index/index'
   }
 })
 
 onShareTimeline(() => {
-  const userInfoStr = uni.getStorageSync('userInfo')
-  let openid = ''
-  if (userInfoStr) {
-    openid = JSON.parse(userInfoStr).openid || ''
-  }
-  
   return {
-    title: '猫咪血糖监测日记',
-    query: openid ? `inviter=${openid}` : ''
+    title: '猫咪控糖日记 - 专业的猫咪糖尿病记录与健康管理助手'
   }
 })
 
@@ -177,7 +172,7 @@ const catInfo = ref({
   avatar: '',
   name: '小煤球',
   age: 0 as number | null,
-  daysSinceDiagnosis: 0,
+  diagnosisDays: 0,
   targetMin: 5.0,
   targetMax: 15.0,
   thresholdNormalMax: 7.0,
@@ -200,11 +195,17 @@ let rawWeightData: any[] = []
 const chartData = ref({})
 const chartOpts = ref({
   color: ["#F39C12"],
-  padding: [15, 10, 0, 15],
-  enableScroll: false,
+  padding: [15, 10, 4, 15],
+  enableScroll: true,
+  dataLabel: true,
   legend: { show: false },
   xAxis: {
     disableGrid: true,
+    itemCount: 5,
+    scrollShow: true,
+    scrollAlign: 'right',
+    fontSize: 10,
+    marginTop: 4
   },
   yAxis: {
     gridType: "dash",
@@ -214,8 +215,13 @@ const chartOpts = ref({
   extra: {
     line: {
       type: "curve",
-      width: 2,
+      width: 2.5,
       activeType: "hollow"
+    },
+    tooltip: {
+      showBox: true,
+      showArrow: true,
+      showCategory: true
     },
     markLine: {
       type: 'solid',
@@ -249,41 +255,57 @@ const fetchCatProfile = async () => {
         if (m < 0 || (m === 0 && today.getDate() < bDate.getDate())) {
             ageNum--
         }
-        catInfo.value.age = ageNum > 0 ? ageNum : 0
+        catInfo.value.age = Math.max(0, ageNum)
       } else {
-        catInfo.value.age = null
+        catInfo.value.age = 0
       }
       
       if (cat.diagnosis_date) {
         const dDate = new Date(cat.diagnosis_date)
         const today = new Date()
         const diffTime = Math.abs(today.getTime() - dDate.getTime())
-        catInfo.value.daysSinceDiagnosis = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+        catInfo.value.daysSinceDiagnosis = diffDays
+      } else {
+        catInfo.value.daysSinceDiagnosis = 0
       }
       
-      if (cat.targetMin && cat.targetMax) {
-        catInfo.value.targetMin = cat.targetMin
-        catInfo.value.targetMax = cat.targetMax
-      }
+      catInfo.value.targetMin = (cat.targetMin !== undefined && !isNaN(Number(cat.targetMin))) ? Number(cat.targetMin) : 4.0
+      catInfo.value.targetMax = (cat.targetMax !== undefined && !isNaN(Number(cat.targetMax))) ? Number(cat.targetMax) : 15.0
+      catInfo.value.thresholdDangerMin = catInfo.value.targetMax
+      catInfo.value.thresholdNormalMax = catInfo.value.targetMax
     } else {
       catInfo.value._id = ''
       allCats.value = []
     }
   } catch (err) {
-    console.log('Error fetching cats via API', err)
+    console.error('获取猫咪信息失败', err)
   }
 }
 
 const fetchRecentRecords = async () => {
   if (!catInfo.value._id) return
   try {
-    const res = await callApi('getRecords', { catId: catInfo.value._id, type: 'blood_glucose', limit: 15 })
+    const res = await callApi('getRecords', { catId: catInfo.value._id, type: 'blood_glucose', limit: 30 })
     if (res.data) {
-      recentRecords.value = res.data.slice(0, 4).map((item: any) => ({
-        time: formatDisplayTime(item.createTime),
-        status: item.period || item.status || '常规',
-        value: item.bg_value
-      }))
+      recentRecords.value = res.data.slice(0, 4).map((item: any) => {
+        let displayTime = ''
+        const timeStr = item.measure_time || ''
+        if (item.record_date && item.record_date.includes('-')) {
+          const [_, m, d] = item.record_date.split('-')
+          displayTime = `${parseInt(m)}月${parseInt(d)}日 ${timeStr}`.trim()
+        } else if (item.createTime) {
+          const d = new Date(item.createTime)
+          const pad = (n: number) => n.toString().padStart(2, '0')
+          const fallbackTime = `${pad(d.getHours())}:${pad(d.getMinutes())}`
+          displayTime = `${d.getMonth() + 1}月${d.getDate()}日 ${timeStr || fallbackTime}`
+        }
+        return {
+          time: displayTime,
+          status: item.period || item.status || '常规',
+          value: item.bg_value
+        }
+      })
       rawGlucoseData = res.data
       if (currentChartTab.value === 'glucose') renderChart()
     }
@@ -295,7 +317,7 @@ const fetchRecentRecords = async () => {
 const fetchRecentWeights = async () => {
   if (!catInfo.value._id) return
   try {
-    const res = await callApi('getRecords', { catId: catInfo.value._id, type: 'weight_records', limit: 15 })
+    const res = await callApi('getRecords', { catId: catInfo.value._id, type: 'weight_records', limit: 30 })
     if (res.data) {
       rawWeightData = res.data
       if (currentChartTab.value === 'weight') renderChart()
@@ -318,8 +340,16 @@ const renderChart = () => {
   if (currentChartTab.value === 'glucose') {
     const chartItems = [...rawGlucoseData].reverse()
     const categories = chartItems.map(item => {
-      const d = new Date(item.createTime)
-      return `${d.getMonth()+1}/${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
+      let dStr = ''
+      if (item.record_date && item.record_date.includes('-')) {
+        const [_, m, d] = item.record_date.split('-')
+        dStr = `${parseInt(m)}/${parseInt(d)}`
+      } else {
+        const d = new Date(item.createTime)
+        dStr = `${d.getMonth()+1}/${d.getDate()}`
+      }
+      const timeStr = item.measure_time ? ` ${item.measure_time}` : ''
+      return `${dStr}${timeStr}`
     })
     const dataPoints = chartItems.map(item => item.bg_value)
     
@@ -327,6 +357,7 @@ const renderChart = () => {
       categories,
       series: [{ name: "血糖值", data: dataPoints }]
     }
+    newOpts.xAxis.itemCount = Math.min(5, Math.max(categories.length, 3))
     newOpts.yAxis.data = [{ min: 0, max: 30 }]
     newOpts.extra.markLine.data = [
       { value: catInfo.value.targetMin, color: '#2ECC71' },
@@ -335,9 +366,16 @@ const renderChart = () => {
   } else {
     const chartItems = [...rawWeightData].reverse()
     const categories = chartItems.map(item => {
-      const d = new Date(item.record_date || item.createTime)
+      let dStr = ''
+      if (item.record_date && item.record_date.includes('-')) {
+        const [_, m, d] = item.record_date.split('-')
+        dStr = `${parseInt(m)}/${parseInt(d)}`
+      } else {
+        const d = new Date(item.createTime)
+        dStr = `${d.getMonth()+1}/${d.getDate()}`
+      }
       const timeStr = item.measure_time ? ` ${item.measure_time}` : ''
-      return `${d.getMonth()+1}/${d.getDate()}${timeStr}`
+      return `${dStr}${timeStr}`
     })
     const dataPoints = chartItems.map(item => item.weight_value)
     
@@ -362,10 +400,16 @@ const fetchRecentInsulins = async () => {
     const res = await callApi('getRecords', { catId: catInfo.value._id, type: 'insulin_records', limit: 4 })
     if (res.data) {
       recentInsulins.value = res.data.map((item: any) => {
-        let displayTime = item.inject_time
-        if (item.createTime) {
-           const d = new Date(item.createTime)
-           displayTime = `${d.getMonth()+1}/${d.getDate()} ${item.inject_time || ''}`
+        let displayTime = ''
+        const timeStr = item.inject_time || ''
+        if (item.record_date && item.record_date.includes('-')) {
+          const [_, m, d] = item.record_date.split('-')
+          displayTime = `${parseInt(m)}月${parseInt(d)}日 ${timeStr}`.trim()
+        } else if (item.createTime) {
+          const d = new Date(item.createTime)
+          const pad = (n: number) => n.toString().padStart(2, '0')
+          const fallbackTime = `${pad(d.getHours())}:${pad(d.getMinutes())}`
+          displayTime = `${d.getMonth() + 1}月${d.getDate()}日 ${timeStr || fallbackTime}`
         }
         return {
           time: displayTime,
@@ -441,6 +485,11 @@ const handleLogMeal = () => {
   uni.navigateTo({ url: '/pages/log-meal/index' })
 }
 
+const handleLogExcretion = () => {
+  if (allCats.value.length === 0) { uni.showToast({ title: '请先添加猫咪', icon: 'none' }); return }
+  uni.navigateTo({ url: '/pages/log-excretion/index' })
+}
+
 const handleLogWeight = () => {
   if (allCats.value.length === 0) { uni.showToast({ title: '请先添加猫咪', icon: 'none' }); return }
   uni.navigateTo({ url: '/pages/log-weight/index' })
@@ -451,14 +500,19 @@ const goToHistory = () => {
 }
 
 const getGlucoseClass = (val: number) => {
-  if (val >= catInfo.value.thresholdDangerMin) {
-    return 'text-danger' // 红色：>= 15.0 高危
-  } else if (val > catInfo.value.thresholdNormalMax) {
-    return 'text-warning' // 橙色：7.0 < val < 15.0 偏高
-  } else if (val < 4.0) {
-    return 'text-danger' // 红色：低血糖高危 (临床通用底线)
+  const min = (catInfo.value.targetMin !== undefined && !isNaN(Number(catInfo.value.targetMin))) ? Number(catInfo.value.targetMin) : 4.0
+  const max = (catInfo.value.targetMax !== undefined && !isNaN(Number(catInfo.value.targetMax))) ? Number(catInfo.value.targetMax) : 15.0
+  const warningMax = max * 1.3 // 动态超标 30% 缓冲阈值
+
+  if (val < min) {
+    return 'text-danger' // 🔴 红色：低于自定义目标下限 (低血糖急症)
+  } else if (val <= max) {
+    return 'text-safe' // 🟢 绿色：安全达标区间 [min, max]
+  } else if (val <= warningMax) {
+    return 'text-warning' // 🟡 黄色：超出目标上限 30% 以内 (轻中度偏高，需观察)
+  } else {
+    return 'text-danger' // 🔴 红色：超出目标上限 30% 以上 (严重高血糖预警)
   }
-  return 'text-safe' // 绿色：正常 (4.0 ~ 7.0)
 }
 </script>
 
@@ -586,9 +640,16 @@ const getGlucoseClass = (val: number) => {
   background: linear-gradient(135deg, #FFFAF0, #FEFCBF);
   border: 2rpx solid rgba(214, 158, 46, 0.1);
 }
+.btn-excretion {
+  background: linear-gradient(135deg, #F0FDF4, #DCFCE7);
+  border: 2rpx solid rgba(22, 163, 74, 0.12);
+}
 .btn-weight {
-  background: linear-gradient(135deg, #F0FFF4, #C6F6D5);
-  border: 2rpx solid rgba(56, 161, 105, 0.1);
+  background: linear-gradient(135deg, #F0F4FF, #D9E2EC);
+  border: 2rpx solid rgba(74, 85, 104, 0.1);
+}
+.action-btn-item.full-width {
+  grid-column: span 2;
 }
 
 .action-icon {
@@ -609,8 +670,11 @@ const getGlucoseClass = (val: number) => {
 .icon-meal-lg {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23D69E2E' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 8h1a4 4 0 0 1 0 8h-1'/%3E%3Cpath d='M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z'/%3E%3Cline x1='6' y1='1' x2='6' y2='4'/%3E%3Cline x1='10' y1='1' x2='10' y2='4'/%3E%3Cline x1='14' y1='1' x2='14' y2='4'/%3E%3C/svg%3E");
 }
+.icon-excretion-lg {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2316A34A' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z'/%3E%3C/svg%3E");
+}
 .icon-weight-lg {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2338A169' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z'/%3E%3Cline x1='7' y1='7' x2='7.01' y2='7'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234A5568' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z'/%3E%3Cline x1='7' y1='7' x2='7.01' y2='7'/%3E%3C/svg%3E");
 }
 
 .action-info {

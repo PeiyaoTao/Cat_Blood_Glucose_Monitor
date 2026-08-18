@@ -49,15 +49,13 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { callApi } from '@/utils/api'
+import { callApi, getLocalTodayDate, getLocalCurrentTime, makeLocalTimestamp, safeNavigateBack } from '@/utils/api'
 
 const weightValue = ref('')
 const isSubmitting = ref(false)
 
-const today = new Date()
-const pad = (n: number) => n.toString().padStart(2, '0')
-const recordDate = ref(`${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`)
-const recordTime = ref(`${pad(today.getHours())}:${pad(today.getMinutes())}`)
+const recordDate = ref(getLocalTodayDate())
+const recordTime = ref(getLocalCurrentTime())
 
 const onDateChange = (e: any) => {
   recordDate.value = e.detail.value
@@ -75,19 +73,20 @@ const submitLog = async () => {
 
   isSubmitting.value = true
   try {
+    const recordDateTime = makeLocalTimestamp(recordDate.value, recordTime.value)
     const recordData = {
       cat_id: uni.getStorageSync('currentCatId') || 'default',
       weight_value: parseFloat(weightValue.value),
       record_date: recordDate.value,
       measure_time: recordTime.value,
-      createTime: Date.now()
+      createTime: recordDateTime
     }
     
     await callApi('addRecord', { type: 'weight_records', recordData })
     
     uni.showToast({ title: '记录成功', icon: 'success' })
     setTimeout(() => {
-      uni.navigateBack()
+      safeNavigateBack()
     }, 1500)
   } catch (err: any) {
     console.error(err)

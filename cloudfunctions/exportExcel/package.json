@@ -1,10 +1,10 @@
 {
   "name": "export-excel",
   "version": "1.0.0",
-  "description": "",
+  "description": "Export styled medical Excel reports",
   "main": "index.js",
   "dependencies": {
-    "node-xlsx": "^0.24.0",
+    "exceljs": "^4.4.0",
     "wx-server-sdk": "~2.6.3"
   }
 }

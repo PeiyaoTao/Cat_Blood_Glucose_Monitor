@@ -26,10 +26,14 @@
       </view>
 
       <view class="form-group">
-        <text class="label">快捷设定</text>
+        <text class="label">快捷设定时间段</text>
         <view class="tags">
           <view class="tag" @click="setOffsetHours(12)">12 小时后</view>
-          <view class="tag" @click="setOffsetHours(1)">1 小时后测试</view>
+          <view class="tag" @click="setOffsetHours(6)">6 小时后</view>
+          <view class="tag" @click="setOffsetHours(5)">5 小时后</view>
+          <view class="tag" @click="setOffsetHours(2)">2 小时后</view>
+          <view class="tag" @click="setOffsetHours(1)">1 小时后</view>
+          <view class="tag" @click="setOffsetHours(0.5)">30 分钟后</view>
         </view>
       </view>
       
@@ -229,6 +233,7 @@ const saveReminderToCloud = async () => {
 }
 .tags {
   display: flex;
+  flex-wrap: wrap;
   gap: 16rpx;
 }
 .tag {
