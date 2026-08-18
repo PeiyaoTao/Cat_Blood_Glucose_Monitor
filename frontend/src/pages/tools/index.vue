@@ -5,7 +5,7 @@
     </view>
 
     <view class="tools-grid">
-      <view class="tool-card" @click="handleToolClick('单位换算器')">
+      <view class="tool-card" @click="handleToolClick('单位换算')">
         <view class="icon-wrap" style="background: #E8F8F5;">
           <view class="icon-svg icon-convert"></view>
         </view>
@@ -13,12 +13,20 @@
         <text class="tool-desc">mmol/L ↔ mg/dL</text>
       </view>
 
-      <view class="tool-card" @click="handleToolClick('干物质计算器')">
+      <view class="tool-card" @click="handleToolClick('干物质计算')">
         <view class="icon-wrap" style="background: #FEF9E7;">
           <view class="icon-svg icon-food"></view>
         </view>
         <text class="tool-name">干物质计算</text>
         <text class="tool-desc">计算猫粮碳水</text>
+      </view>
+
+      <view class="tool-card" @click="handleToolClick('自动喂食托管')">
+        <view class="icon-wrap" style="background: #F0FDF4;">
+          <view class="icon-svg icon-feeder"></view>
+        </view>
+        <text class="tool-name">自动喂食托管</text>
+        <text class="tool-desc" :class="{ 'text-running': isFeederRunning }">{{ feederStatusDesc }}</text>
       </view>
 
       <view class="tool-card" @click="handleToolClick('设置提醒')">
@@ -36,31 +44,77 @@
         <text class="tool-name">导出报告</text>
         <text class="tool-desc">生成就诊 Excel</text>
       </view>
+
+      <view class="tool-card" @click="handleToolClick('导入数据')">
+        <view class="icon-wrap" style="background: #F8FAFC;">
+          <view class="icon-svg icon-import"></view>
+        </view>
+        <text class="tool-name">导入数据</text>
+        <text class="tool-desc">智能识别历史 Excel</text>
+      </view>
     </view>
   </view>
 </template>
 
 <script setup lang="ts">
-const handleToolClick = (toolName: string) => {
-  if (toolName === '单位换算器' || toolName === '单位换算') {
-    uni.navigateTo({ url: '/pages/tools/converter/index' })
-  } else if (toolName === '干物质计算器' || toolName === '干物质计算') {
-    uni.navigateTo({ url: '/pages/tools/dry-matter/index' })
-  } else if (toolName === '导出报告') {
-    uni.showActionSheet({
-      itemList: ['导出最近 30 天 (推荐)', '导出全部记录'],
-      success: function (res) {
-        const days = res.tapIndex === 0 ? 30 : 0
-        exportExcel(days)
-      }
-    })
-  } else if (toolName === '医疗提醒' || toolName === '打针提醒' || toolName === '设置提醒') {
-    uni.navigateTo({ url: '/pages/tools/alarm/index' })
+import { ref } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
+import { getFeederConfig, isFeederConfigValid } from '@/utils/feederSync'
+
+const feederStatusDesc = ref('适配喂食机定时出餐')
+const isFeederRunning = ref(false)
+
+const refreshFeederStatus = () => {
+  const catId = uni.getStorageSync('currentCatId') || 'default'
+  const cfg = getFeederConfig(catId)
+  if (cfg.is_active && isFeederConfigValid(cfg)) {
+    isFeederRunning.value = true
+    feederStatusDesc.value = `● 运行中 (${cfg.schedule.length}餐/天)`
+  } else if (isFeederConfigValid(cfg)) {
+    isFeederRunning.value = false
+    feederStatusDesc.value = '○ 已暂停托管'
   } else {
-    uni.showToast({
-      title: `${toolName} 开发中`,
-      icon: 'none'
-    })
+    isFeederRunning.value = false
+    feederStatusDesc.value = '未设置出餐计划'
+  }
+}
+
+onShow(() => {
+  refreshFeederStatus()
+})
+
+const handleToolClick = (toolName: string) => {
+  switch (toolName) {
+    case '自动喂食托管':
+    case '自动喂食':
+      uni.navigateTo({ url: '/pages/tools/auto-feeder/index' })
+      break
+    case '单位换算':
+    case '单位换算器':
+      uni.navigateTo({ url: '/pages/tools/converter/index' })
+      break
+    case '干物质计算':
+    case '干物质计算器':
+      uni.navigateTo({ url: '/pages/tools/dry-matter/index' })
+      break
+    case '导入数据':
+    case '导入历史数据':
+      uni.navigateTo({ url: '/pages/tools/import/index' })
+      break
+    case '设置提醒':
+    case '打针提醒':
+    case '医疗提醒':
+      uni.navigateTo({ url: '/pages/tools/alarm/index' })
+      break
+    case '导出报告':
+      uni.showActionSheet({
+        itemList: ['导出最近 30 天 (推荐)', '导出全部记录'],
+        success: (res) => {
+          const days = res.tapIndex === 0 ? 30 : 0
+          exportExcel(days)
+        }
+      })
+      break
   }
 }
 
@@ -193,6 +247,10 @@ const exportExcel = async (days: number) => {
   font-size: 24rpx;
   color: var(--text-sub);
 }
+.text-running {
+  color: #10B981 !important;
+  font-weight: 600;
+}
 .icon-svg {
   width: 44rpx;
   height: 44rpx;
@@ -204,4 +262,6 @@ const exportExcel = async (days: number) => {
 .icon-food { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F1C40F' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21.21 15.89A10 10 0 1 1 8 2.83'/%3E%3Cpath d='M22 12A10 10 0 0 0 12 2v10z'/%3E%3C/svg%3E"); }
 .icon-alarm { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233498DB' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpolyline points='12 6 12 12 16 14'/%3E%3C/svg%3E"); }
 .icon-report { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23E74C3C' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='12' x2='12' y1='20' y2='10'/%3E%3Cline x1='18' x2='18' y1='20' y2='4'/%3E%3Cline x1='6' x2='6' y1='20' y2='16'/%3E%3C/svg%3E"); }
+.icon-feeder { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2310B981' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='4' width='20' height='16' rx='2'/%3E%3Cpath d='M6 8h4'/%3E%3Cpath d='M6 12h8'/%3E%3Ccircle cx='16' cy='8' r='2'/%3E%3Cpath d='M10 16h8'/%3E%3C/svg%3E"); }
+.icon-import { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2316A085' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/%3E%3Cpolyline points='17 8 12 3 7 8'/%3E%3Cline x1='12' y1='3' x2='12' y2='15'/%3E%3C/svg%3E"); }
 </style>

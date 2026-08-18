@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { onLaunch, onShow, onHide } from "@dcloudio/uni-app";
+import { checkAndSyncAutoFeeder } from "@/utils/feederSync";
+
 onLaunch(() => {
   console.log("App Launch");
   // 初始化微信云开发
@@ -10,9 +12,13 @@ onLaunch(() => {
     console.log("微信云开发已初始化");
   }
 });
+
 onShow(() => {
   console.log("App Show");
+  // 静默触发自动喂食托管出餐对齐
+  checkAndSyncAutoFeeder();
 });
+
 onHide(() => {
   console.log("App Hide");
 });

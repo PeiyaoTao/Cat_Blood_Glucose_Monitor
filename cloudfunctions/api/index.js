@@ -199,6 +199,25 @@ exports.main = async (event, context) => {
         return { success: true }
       }
 
+      case 'saveFeederConfig': {
+        const { catId, config } = payload
+        if (!catId) throw new Error('Missing catId')
+        await checkCatAccess(catId)
+        await db.collection('cats').doc(catId).update({
+          data: {
+            auto_feeder_config: config
+          }
+        })
+        return { success: true }
+      }
+
+      case 'getFeederConfig': {
+        const { catId } = payload
+        if (!catId) throw new Error('Missing catId')
+        const cat = await checkCatAccess(catId)
+        return { success: true, config: cat.auto_feeder_config || null }
+      }
+
       case 'getRecords': {
         const { catId, type, limit = 20, skip = 0 } = payload
         await checkCatAccess(catId)

@@ -142,6 +142,7 @@ import { ref, computed } from 'vue'
 import { onShow, onLoad, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
 import qiunDataCharts from 'ch-ucharts/components/qiun-data-charts/qiun-data-charts.vue'
 import { callApi } from '@/utils/api'
+import { checkAndSyncAutoFeeder } from '@/utils/feederSync'
 
 onLoad(async (options: any) => {
   if (options && options.inviter) {
@@ -443,6 +444,8 @@ const formatDisplayTime = (date: Date) => {
 const loadAllData = async () => {
   await fetchCatProfile()
   if (catInfo.value._id || allCats.value.length === 0) {
+    // 静默执行自动喂食机对齐补录
+    await checkAndSyncAutoFeeder(catInfo.value._id)
     fetchRecentRecords()
     fetchRecentInsulins()
     fetchRecentWeights()
@@ -750,7 +753,7 @@ const getGlucoseClass = (val: number) => {
   color: var(--safe-green);
 }
 .text-warning {
-  color: #F39C12;
+  color: #F1C40F;
 }
 .text-danger {
   color: var(--danger-red);

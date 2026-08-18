@@ -1,5 +1,22 @@
 <template>
   <view class="container">
+    <!-- 自动喂食机托管提示横条 -->
+    <view class="feeder-banner" @click="goToAutoFeeder">
+      <view class="banner-left">
+        <view class="icon-svg icon-feeder-sm"></view>
+        <text class="banner-text" v-if="feederState.isRunning">
+          自动喂食托管中 (每日 {{ feederState.mealCount }} 顿 · {{ feederState.totalGrams }}g)
+        </text>
+        <text class="banner-text" v-else-if="feederState.hasConfig">
+          自动喂食托管已暂停
+        </text>
+        <text class="banner-text text-muted" v-else>
+          正在使用自动喂食机？开启定时出餐托管
+        </text>
+      </view>
+      <text class="banner-link">{{ feederState.hasConfig ? '管理计划 >' : '去设置 >' }}</text>
+    </view>
+
     <view class="card">
       <view class="form-group">
         <text class="label">进食克数 (g) <text class="required">*</text></text>
@@ -44,7 +61,7 @@
         <view class="label-row">
           <text class="label">罐头品牌 / 批次 (选填)</text>
           <text class="save-link" v-if="formData.food_brand.trim()" @click="saveCustomFoodBrand">
-            ⭐️ 保存为常用罐头
+            保存为常用罐头
           </text>
         </view>
         <view class="input-wrap">
@@ -71,7 +88,7 @@
         <view class="label-row">
           <text class="label">附带东西 / 补剂用药 (选填)</text>
           <text class="save-link" v-if="formData.extras.trim()" @click="saveCustomExtras">
-            ⭐️ 保存为常用补剂
+            保存为常用补剂
           </text>
         </view>
         <view class="input-wrap">
@@ -109,10 +126,36 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { callApi, getLocalTodayDate, getLocalCurrentTime, makeLocalTimestamp, safeNavigateBack } from '@/utils/api'
+import { getFeederConfig, isFeederConfigValid } from '@/utils/feederSync'
 
-const mealPeriodOptions = ['早餐 (早针餐)', '午餐/加餐', '晚餐 (晚针餐)', '夜宵/夜间加餐', '常规喂食']
+const mealPeriodOptions = ['早餐 (早针餐)', '午餐/加餐', '晚餐 (晚针餐)', '夜宵/夜间加餐', '常规喂食', '自动喂食机出餐']
 const periodIndex = ref(0)
+
+const feederState = ref({
+  hasConfig: false,
+  isRunning: false,
+  mealCount: 0,
+  totalGrams: 0
+})
+
+const refreshFeederState = () => {
+  const catId = uni.getStorageSync('currentCatId') || 'default'
+  const cfg = getFeederConfig(catId)
+  const valid = isFeederConfigValid(cfg)
+  const total = (cfg.schedule || []).reduce((sum, item) => sum + (Number(item.food_grams) || 0), 0)
+  feederState.value = {
+    hasConfig: valid,
+    isRunning: cfg.is_active && valid,
+    mealCount: cfg.schedule ? cfg.schedule.length : 0,
+    totalGrams: total
+  }
+}
+
+const goToAutoFeeder = () => {
+  uni.navigateTo({ url: '/pages/tools/auto-feeder/index' })
+}
 
 const defaultFoodTags = ['巅峰牛肉', 'K9羊肉', '小李子', 'RAWZ兔肉', '冻干主食', '处方低碳粮']
 const customFoodList = ref<string[]>([])
@@ -133,6 +176,11 @@ const loadSavedPresets = () => {
 
 onMounted(() => {
   loadSavedPresets()
+  refreshFeederState()
+})
+
+onShow(() => {
+  refreshFeederState()
 })
 
 const allFoodTags = computed(() => {
@@ -409,5 +457,51 @@ const submitRecord = async () => {
   font-size: 32rpx;
   font-weight: 700;
   background: linear-gradient(135deg, #D69E2E, #ECC94B);
+}
+
+/* 自动喂食机横条 */
+.feeder-banner {
+  background: #F0FDF4;
+  border: 2rpx solid #BBF7D0;
+  border-radius: 20rpx;
+  padding: 20rpx 28rpx;
+  margin-bottom: 28rpx;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.banner-left {
+  display: flex;
+  align-items: center;
+  flex: 1;
+}
+.icon-svg {
+  display: inline-block;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+.icon-feeder-sm {
+  width: 36rpx;
+  height: 36rpx;
+  margin-right: 14rpx;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2310B981' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='4' width='20' height='16' rx='2'/%3E%3Cpath d='M6 8h4'/%3E%3Cpath d='M6 12h8'/%3E%3Ccircle cx='16' cy='8' r='2'/%3E%3Cpath d='M10 16h8'/%3E%3C/svg%3E");
+}
+.banner-text {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #047857;
+}
+.banner-text.text-paused {
+  color: #D97706;
+}
+.banner-text.text-muted {
+  color: #4B5563;
+}
+.banner-link {
+  font-size: 22rpx;
+  font-weight: 700;
+  color: #059669;
+  margin-left: 12rpx;
 }
 </style>

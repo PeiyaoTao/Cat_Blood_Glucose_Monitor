@@ -1,0 +1,10 @@
+{
+  "name": "import-excel",
+  "version": "1.0.0",
+  "description": "Intelligent Excel parser and batch importer for Cat Sugar Diary",
+  "main": "index.js",
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "wx-server-sdk": "~2.6.3"
+  }
+}

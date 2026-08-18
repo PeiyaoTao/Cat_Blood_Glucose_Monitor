@@ -64,6 +64,20 @@
 			}
 		},
 		{
+			"path": "pages/tools/import/index",
+			"style": {
+				"navigationBarTitleText": "导入数据",
+				"navigationBarBackgroundColor": "#F7F9FC"
+			}
+		},
+		{
+			"path": "pages/tools/auto-feeder/index",
+			"style": {
+				"navigationBarTitleText": "自动喂食托管",
+				"navigationBarBackgroundColor": "#F7F9FC"
+			}
+		},
+		{
 			"path": "pages/history/index",
 			"style": {
 				"navigationBarTitleText": "历史数据",
