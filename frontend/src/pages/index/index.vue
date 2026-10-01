@@ -1,5 +1,5 @@
 <template>
-  <view class="container">
+  <view class="container" @tap="handleBackgroundTap">
     <!-- 头部：猫咪档案概览 -->
     <view class="header">
       <view class="avatar-wrap">
@@ -65,16 +65,70 @@
           <text class="tab-item" :class="{ active: currentChartTab === 'glucose' }" @click="switchTab('glucose')">近期血糖</text>
           <text class="tab-item" :class="{ active: currentChartTab === 'weight' }" @click="switchTab('weight')">近期体重</text>
         </view>
+        <view class="chart-fullscreen-btn" @click="openFullscreen" title="全屏图表">
+          <view class="icon-svg icon-chart-bars"></view>
+        </view>
       </view>
-      <view class="chart-placeholder">
-        <qiun-data-charts 
-          type="line"
-          canvasId="glucoseChart"
-          :canvas2d="true"
-          :ontouch="true"
-          :opts="chartOpts"
-          :chartData="chartData"
-        />
+
+      <!-- 选中数据点详细浮层 (长按或单点选中后展示，点击可直接关闭) -->
+      <view class="selected-point-badge" v-if="selectedPointInfo" @tap.stop="closeBadge">
+        <text class="spb-date">{{ selectedPointInfo.time }}</text>
+        <view class="spb-right">
+          <text class="spb-val" :style="{ color: selectedPointInfo.color }">
+            {{ selectedPointInfo.label }}: {{ selectedPointInfo.value }} {{ selectedPointInfo.unit }}
+          </text>
+          <text class="spb-status" :class="selectedPointInfo.badgeClass" v-if="selectedPointInfo.statusText">
+            {{ selectedPointInfo.statusText }}
+          </text>
+        </view>
+      </view>
+
+      <!-- 触界 / 缩放极限轻量提示 Toast -->
+      <view class="chart-limit-toast" v-if="toastMsg">
+        <text class="chart-limit-toast-text">{{ toastMsg }}</text>
+      </view>
+
+      <!-- Canvas 2D 绘图容器：支持双指缩放、滑动手势、边界回弹动画、长按连续选点 -->
+      <view 
+        class="main-chart-canvas-box" 
+        :class="[zoomLimitClass, edgeLimitClass]"
+        v-if="!showFullscreenModal"
+        @tap.stop
+        @touchstart="handleChartTouchStart"
+        @touchmove.stop="handleChartTouchMove"
+        @touchend="handleChartTouchEnd"
+        @touchcancel="handleChartTouchCancel"
+      >
+        <canvas 
+          type="2d" 
+          id="mainChartCanvas" 
+          class="main-chart-canvas"
+          @tap.stop
+        ></canvas>
+      </view>
+      <view class="main-chart-canvas-box" v-else></view>
+
+      <!-- 可直接拖动的灰色进度条 (与手势 100% 同步) -->
+      <view 
+        class="chart-slider-wrapper" 
+        v-if="currentChartItems.length > currentZoomCount && !showFullscreenModal"
+        :style="{ paddingLeft: sliderPaddingLeft, paddingRight: sliderPaddingRight }"
+      >
+        <view 
+          class="chart-slider-track" 
+          id="chartSliderTrack"
+          @tap.stop
+          @touchstart.stop="onSliderTouchStart"
+          @touchmove.stop="onSliderTouchMove"
+          @touchend.stop="onSliderTouchEnd"
+        >
+          <view class="chart-slider-rail"></view>
+          <view 
+            class="chart-slider-thumb" 
+            :class="{ active: isDraggingSlider }"
+            :style="{ width: thumbWidthPercent + '%', left: thumbLeftPercent + '%' }"
+          ></view>
+        </view>
       </view>
     </view>
 
@@ -134,13 +188,23 @@
         <text class="disclaimer-text bold">免责声明：本程序仅供追踪与辅助，不构成医疗诊断。任何剂量的调整，请遵从主治兽医医嘱。</text>
       </view>
     </view>
+
+    <!-- 全屏深度趋势分析模态窗 -->
+    <FullscreenAnalysisModal 
+      v-model:visible="showFullscreenModal"
+      :glucoseRecords="rawGlucoseData"
+      :weightRecords="rawWeightData"
+      :targetMin="catInfo.targetMin"
+      :targetMax="catInfo.targetMax"
+      @close="handleCloseFullscreen"
+    />
   </view>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick, getCurrentInstance } from 'vue'
 import { onShow, onLoad, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
-import qiunDataCharts from 'ch-ucharts/components/qiun-data-charts/qiun-data-charts.vue'
+import FullscreenAnalysisModal from '@/components/FullscreenAnalysisModal.vue'
 import { callApi } from '@/utils/api'
 import { checkAndSyncAutoFeeder } from '@/utils/feederSync'
 
@@ -173,6 +237,7 @@ const catInfo = ref({
   avatar: '',
   name: '小煤球',
   age: 0 as number | null,
+  daysSinceDiagnosis: 0,
   diagnosisDays: 0,
   targetMin: 5.0,
   targetMax: 15.0,
@@ -181,6 +246,22 @@ const catInfo = ref({
 })
 const allCats = ref<any[]>([])
 
+const showFullscreenModal = ref(false)
+const openFullscreen = () => {
+  showFullscreenModal.value = true
+}
+const handleCloseFullscreen = () => {
+  showFullscreenModal.value = false
+  nextTick(() => {
+    setTimeout(() => {
+      initMainCanvas(() => {
+        initPositionForCurrentChart()
+        updateTrackRect()
+      })
+    }, 100)
+  })
+}
+
 const greetingText = computed(() => {
   const hour = new Date().getHours()
   if (hour < 12) return '早上好，铲屎官'
@@ -188,49 +269,671 @@ const greetingText = computed(() => {
   return '晚上好，铲屎官'
 })
 
-const currentChartTab = ref('glucose')
+const currentChartTab = ref<'glucose' | 'weight'>('glucose')
 const recentRecords = ref<any[]>([])
 const recentInsulins = ref<any[]>([])
-let rawGlucoseData: any[] = []
-let rawWeightData: any[] = []
-const chartData = ref({})
-const chartOpts = ref({
-  color: ["#F39C12"],
-  padding: [15, 10, 4, 15],
-  enableScroll: true,
-  dataLabel: true,
-  legend: { show: false },
-  xAxis: {
-    disableGrid: true,
-    itemCount: 5,
-    scrollShow: true,
-    scrollAlign: 'right',
-    fontSize: 10,
-    marginTop: 4
-  },
-  yAxis: {
-    gridType: "dash",
-    dashLength: 2,
-    data: [{ min: 0, max: 30 }]
-  },
-  extra: {
-    line: {
-      type: "curve",
-      width: 2.5,
-      activeType: "hollow"
-    },
-    tooltip: {
-      showBox: true,
-      showArrow: true,
-      showCategory: true
-    },
-    markLine: {
-      type: 'solid',
-      dashLength: 4,
-      data: []
+const rawGlucoseData = ref<any[]>([])
+const rawWeightData = ref<any[]>([])
+let lastChartTouchEndTime = 0
+
+// Canvas 2D 实体引用与布局尺寸
+const instance = getCurrentInstance()
+let mainCanvasNode: any = null
+let mainCanvasCtx: any = null
+let mainCanvasWidth = 0
+let mainCanvasHeight = 0
+let canvasBoxLeft = 0
+
+// 手势交互与缩放状态
+const currentZoomCount = ref(5)
+const selectedPointIndex = ref(-1)
+let scrollX = 0
+let animTimer: any = null
+
+let touchStartX = 0
+let touchStartY = 0
+let touchStartScrollX = 0
+let lastTouchX = 0
+let lastTouchTime = 0
+let velocity = 0
+let isDragging = false
+let isScrubbing = false
+let isPinching = false
+let wasPinching = false
+let startPinchDist = 0
+let startZoomCount = 5
+let startPinchCenterPlotX = 0
+let startPinchItemIdx = 0
+let longPressTimer: any = null
+let edgeTriggered = false
+
+// 缩放/边界触底动画与轻量 Toast
+const zoomLimitClass = ref('')
+const edgeLimitClass = ref('')
+const toastMsg = ref('')
+let toastTimer: any = null
+
+const showToastTip = (msg: string) => {
+  toastMsg.value = msg
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => {
+    toastMsg.value = ''
+  }, 1200)
+}
+
+const triggerZoomLimitAnimation = (type: 'in' | 'out', tipText?: string) => {
+  zoomLimitClass.value = type === 'in' ? 'zoom-limit-in' : 'zoom-limit-out'
+  showToastTip(tipText || (type === 'in' ? '已放大至最大视图 (3项)' : '已缩小至全景视图'))
+  setTimeout(() => {
+    zoomLimitClass.value = ''
+  }, 240)
+}
+
+const triggerEdgeLimitAnimation = (dir: 'left' | 'right', tipText?: string) => {
+  edgeLimitClass.value = dir === 'left' ? 'edge-limit-left' : 'edge-limit-right'
+  showToastTip(tipText || (dir === 'left' ? '已至最早记录' : '已至最新记录'))
+  setTimeout(() => {
+    edgeLimitClass.value = ''
+  }, 260)
+}
+
+const formatItemDate = (item: any) => {
+  let dStr = ''
+  if (item.record_date && item.record_date.includes('-')) {
+    const [_, m, d] = item.record_date.split('-')
+    dStr = `${parseInt(m)}/${parseInt(d)}`
+  } else if (item.createTime) {
+    const d = new Date(item.createTime)
+    dStr = `${d.getMonth() + 1}/${d.getDate()}`
+  } else {
+    dStr = '近期'
+  }
+  const timeStr = item.measure_time ? ` ${item.measure_time}` : ''
+  return {
+    dayNum: dStr,
+    time: `${dStr}${timeStr}`
+  }
+}
+
+const getStatusMeta = (bg: number) => {
+  const min = (catInfo.value.targetMin !== undefined && !isNaN(Number(catInfo.value.targetMin))) ? Number(catInfo.value.targetMin) : 4.0
+  const max = (catInfo.value.targetMax !== undefined && !isNaN(Number(catInfo.value.targetMax))) ? Number(catInfo.value.targetMax) : 15.0
+  const warningMax = max * 1.3
+
+  if (bg <= 0) {
+    return { color: '#94A3B8', text: '无数据', badgeClass: 'badge-gray' }
+  } else if (bg < min) {
+    return { color: '#DC2626', text: '低血糖', badgeClass: 'badge-red' }
+  } else if (bg <= max) {
+    return { color: '#16A34A', text: '达标', badgeClass: 'badge-green' }
+  } else if (bg <= warningMax) {
+    return { color: '#CA8A04', text: '偏高', badgeClass: 'badge-yellow' }
+  } else {
+    return { color: '#DC2626', text: '危险过高', badgeClass: 'badge-red' }
+  }
+}
+
+// 统一当前展示的数据切片列表
+const currentChartItems = computed(() => {
+  if (currentChartTab.value === 'glucose') {
+    const chartItems = [...rawGlucoseData.value].reverse()
+    return chartItems.map((item, idx) => {
+      const dt = formatItemDate(item)
+      const bg = typeof item.bg_value === 'number' ? Number(item.bg_value.toFixed(1)) : parseFloat(item.bg_value || '0')
+      const meta = getStatusMeta(bg)
+      return {
+        id: item._id || `bg_${idx}`,
+        date: dt.dayNum,
+        dayNum: dt.dayNum,
+        time: dt.time,
+        value: bg,
+        status: item.period || item.status || '常规',
+        color: meta.color,
+        textColor: meta.color,
+        badgeClass: meta.badgeClass,
+        statusText: meta.text
+      }
+    })
+  } else {
+    const chartItems = [...rawWeightData.value].reverse()
+    return chartItems.map((item, idx) => {
+      const dt = formatItemDate(item)
+      const wt = typeof item.weight_value === 'number' ? Number(item.weight_value.toFixed(2)) : parseFloat(item.weight_value || '0')
+      return {
+        id: item._id || `wt_${idx}`,
+        date: dt.dayNum,
+        dayNum: dt.dayNum,
+        time: dt.time,
+        value: wt,
+        status: '常规',
+        color: '#3B82F6',
+        textColor: '#2563EB',
+        badgeClass: 'badge-blue',
+        statusText: '体重'
+      }
+    })
+  }
+})
+
+// 选中数据点详细信息
+const selectedPointInfo = computed(() => {
+  if (selectedPointIndex.value < 0 || selectedPointIndex.value >= currentChartItems.value.length) {
+    return null
+  }
+  const item = currentChartItems.value[selectedPointIndex.value]
+  if (currentChartTab.value === 'glucose') {
+    const meta = getStatusMeta(item.value)
+    return {
+      time: item.time,
+      label: '血糖',
+      value: item.value.toFixed(1),
+      unit: 'mmol/L',
+      color: meta.color,
+      badgeClass: meta.badgeClass,
+      statusText: meta.text
+    }
+  } else {
+    return {
+      time: item.time,
+      label: '体重',
+      value: item.value.toFixed(2),
+      unit: 'kg',
+      color: '#2563EB',
+      badgeClass: 'badge-blue',
+      statusText: '体重'
     }
   }
 })
+
+// 图表绘图核心尺寸与滚动边界
+const getPlotMetrics = () => {
+  const padLeft = 38
+  const padRight = (mainCanvasWidth || 345) - 20
+  const plotWidth = Math.max(10, padRight - padLeft)
+  const winSize = currentZoomCount.value
+  const spacing = plotWidth / (winSize - 1 || 1)
+  return { padLeft, padRight, plotWidth, winSize, spacing }
+}
+
+const getMinScrollX = () => {
+  const total = currentChartItems.value.length
+  const { spacing } = getPlotMetrics()
+  const winSize = currentZoomCount.value
+  if (total <= winSize) return 0
+  return - (total - winSize) * spacing
+}
+
+// 灰色原生进度条联动逻辑
+const sliderPaddingLeft = ref('38px')
+const sliderPaddingRight = ref('20px')
+const isDraggingSlider = ref(false)
+const sliderScrollRatio = ref(1.0)
+
+const thumbWidthPercent = computed(() => {
+  const total = currentChartItems.value.length
+  if (total <= currentZoomCount.value) return 100
+  const ratio = Math.max(0.12, Math.min(0.6, currentZoomCount.value / total))
+  return Math.round(ratio * 100)
+})
+
+const thumbLeftPercent = computed(() => {
+  const maxTravel = 100 - thumbWidthPercent.value
+  return Number((sliderScrollRatio.value * maxTravel).toFixed(2))
+})
+
+let trackRect: { left: number, width: number } | null = null
+
+const updateTrackRect = () => {
+  return new Promise<void>((resolve) => {
+    const target = instance?.proxy || instance
+    const query = uni.createSelectorQuery().in(target)
+    query.select('#chartSliderTrack').boundingClientRect((res: any) => {
+      if (res && res.width) {
+        trackRect = { left: res.left, width: res.width }
+      }
+      resolve()
+    }).exec()
+  })
+}
+
+const onSliderTouchStart = async (e: any) => {
+  isDraggingSlider.value = true
+  if (animTimer) {
+    clearTimeout(animTimer)
+    animTimer = null
+  }
+  if (!trackRect) {
+    await updateTrackRect()
+  } else {
+    updateTrackRect()
+  }
+  handleSliderTouch(e)
+}
+
+const onSliderTouchMove = (e: any) => {
+  if (!isDraggingSlider.value) return
+  handleSliderTouch(e)
+}
+
+const onSliderTouchEnd = (e: any) => {
+  if (!isDraggingSlider.value) return
+  handleSliderTouch(e)
+  isDraggingSlider.value = false
+}
+
+const handleSliderTouch = (e: any) => {
+  if (!trackRect || !trackRect.width) return
+  const touch = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0])
+  if (!touch) return
+  const clientX = touch.clientX
+  const relativeX = clientX - trackRect.left
+  const thumbW = (thumbWidthPercent.value / 100) * trackRect.width
+  const maxTravel = trackRect.width - thumbW
+  let clampedRatio = 0
+  if (maxTravel > 0) {
+    const thumbLeft = Math.max(0, Math.min(maxTravel, relativeX - thumbW / 2))
+    clampedRatio = thumbLeft / maxTravel
+  } else {
+    clampedRatio = 1.0
+  }
+
+  const minScroll = getMinScrollX()
+  scrollX = clampedRatio * minScroll
+  sliderScrollRatio.value = clampedRatio
+  drawMainChart()
+}
+
+// 点击图表外空白处 -> 取消数据点选中状态
+const handleBackgroundTap = () => {
+  // 若刚在图表上有触控或选点操作（400ms 保护期），坚决阻断合成 tap 事件导致的误取消
+  if (Date.now() - lastChartTouchEndTime < 400) {
+    return
+  }
+  if (selectedPointIndex.value !== -1) {
+    selectedPointIndex.value = -1
+    drawMainChart()
+  }
+}
+
+// 点击数据点浮层本身直接关闭
+const closeBadge = () => {
+  selectedPointIndex.value = -1
+  drawMainChart()
+}
+
+// 触摸交互状态机与物理滑动
+const getBoxLeft = () => {
+  if (canvasBoxLeft > 0) return canvasBoxLeft
+  try {
+    const sys = uni.getSystemInfoSync()
+    return (sys.windowWidth * 32) / 750
+  } catch (e) {
+    return 16
+  }
+}
+
+const handleTapSelect = (clientX: number) => {
+  const items = currentChartItems.value
+  if (!items.length) return
+  const boxLeft = getBoxLeft()
+  const { padLeft, spacing } = getPlotMetrics()
+  const clickX = clientX - boxLeft
+
+  let closestIdx = -1
+  let minDiff = 99999
+  items.forEach((_, i) => {
+    const x = padLeft + i * spacing + scrollX
+    const diff = Math.abs(x - clickX)
+    if (diff < minDiff) {
+      minDiff = diff
+      closestIdx = i
+    }
+  })
+
+  const hitRadius = Math.max(24, spacing / 2)
+  if (closestIdx !== -1 && minDiff <= hitRadius) {
+    selectedPointIndex.value = closestIdx
+    drawMainChart()
+  } else {
+    if (selectedPointIndex.value !== -1) {
+      selectedPointIndex.value = -1
+      drawMainChart()
+    }
+  }
+}
+
+const reboundToBoundary = () => {
+  if (animTimer) {
+    clearTimeout(animTimer)
+    animTimer = null
+  }
+  const minScroll = getMinScrollX()
+  const target = scrollX > 0 ? 0 : minScroll
+  const start = scrollX
+  const startTime = Date.now()
+  const duration = 240
+
+  const stepAnim = () => {
+    const elapsed = Date.now() - startTime
+    const progress = Math.min(1, elapsed / duration)
+    const ease = 1 - Math.pow(1 - progress, 3)
+    scrollX = start + (target - start) * ease
+    drawMainChart()
+
+    if (progress < 1) {
+      animTimer = setTimeout(stepAnim, 16)
+    } else {
+      scrollX = target
+      drawMainChart()
+      animTimer = null
+    }
+  }
+  stepAnim()
+}
+
+const startInertia = (initVelocity: number) => {
+  if (animTimer) {
+    clearTimeout(animTimer)
+    animTimer = null
+  }
+  let v = initVelocity * 14
+  if (v > 25) v = 25
+  if (v < -25) v = -25
+
+  const friction = 0.92
+
+  const stepFlick = () => {
+    if (Math.abs(v) < 0.4) {
+      animTimer = null
+      const minScroll = getMinScrollX()
+      if (scrollX > 0 || scrollX < minScroll) {
+        reboundToBoundary()
+      }
+      return
+    }
+
+    v *= friction
+    scrollX += v
+    const minScroll = getMinScrollX()
+
+    if (scrollX > 0) {
+      scrollX *= 0.6
+      v *= 0.5
+    } else if (scrollX < minScroll) {
+      const over = scrollX - minScroll
+      scrollX = minScroll + over * 0.6
+      v *= 0.5
+    }
+
+    drawMainChart()
+
+    if (scrollX > 20 || scrollX < minScroll - 20) {
+      animTimer = null
+      reboundToBoundary()
+      return
+    }
+
+    animTimer = setTimeout(stepFlick, 16)
+  }
+  stepFlick()
+}
+
+const handleChartTouchStart = (e: any) => {
+  if (!e.touches) return
+  edgeTriggered = false
+  if (animTimer) {
+    clearTimeout(animTimer)
+    animTimer = null
+  }
+
+  // 双指缩放
+  if (e.touches.length === 2) {
+    if (longPressTimer) {
+      clearTimeout(longPressTimer)
+      longPressTimer = null
+    }
+    isScrubbing = false
+    isDragging = false
+    isPinching = true
+    wasPinching = true
+    const p1 = e.touches[0]
+    const p2 = e.touches[1]
+    startPinchDist = Math.hypot(p1.clientX - p2.clientX, p1.clientY - p2.clientY)
+    startZoomCount = currentZoomCount.value
+
+    const boxLeft = getBoxLeft()
+    const { padLeft, plotWidth, spacing } = getPlotMetrics()
+    const pinchScreenX = (p1.clientX + p2.clientX) / 2
+    startPinchCenterPlotX = Math.max(0, Math.min(plotWidth, pinchScreenX - boxLeft - padLeft))
+    startPinchItemIdx = (-scrollX + startPinchCenterPlotX) / (spacing || 1)
+    edgeTriggered = false
+    return
+  }
+
+  // 单指交互
+  if (e.touches.length === 1) {
+    // 若当前手势包含缩放，在所有手指彻底离开前，绝对不初始化单指参数
+    if (isPinching || wasPinching) {
+      return
+    }
+    touchStartX = e.touches[0].clientX
+    touchStartY = e.touches[0].clientY
+    touchStartScrollX = scrollX
+    lastTouchX = touchStartX
+    lastTouchTime = Date.now()
+    velocity = 0
+    isDragging = false
+    isScrubbing = false
+    isPinching = false
+    wasPinching = false
+
+    if (longPressTimer) {
+      clearTimeout(longPressTimer)
+      longPressTimer = null
+    }
+
+    // 长按 220ms 触发滑动选点模式
+    longPressTimer = setTimeout(() => {
+      longPressTimer = null
+      isScrubbing = true
+      handleTapSelect(touchStartX)
+    }, 220)
+  }
+}
+
+const handleChartTouchMove = (e: any) => {
+  if (!e.touches) return
+
+  // 双指手势缩放 (以双指中心点为几何锚点，保持当前缩放数据点位置不动)
+  if (e.touches.length === 2 && isPinching) {
+    const p1 = e.touches[0]
+    const p2 = e.touches[1]
+    const curDist = Math.hypot(p1.clientX - p2.clientX, p1.clientY - p2.clientY)
+    const diff = curDist - startPinchDist
+    const total = Math.max(3, currentChartItems.value.length)
+    const minZoom = 3
+    const maxZoom = Math.max(15, total)
+
+    const deltaUnits = Math.round(-diff / 22)
+    let targetCount = startZoomCount + deltaUnits
+    targetCount = Math.max(minZoom, Math.min(maxZoom, targetCount))
+
+    if (curDist - startPinchDist > 30 && currentZoomCount.value === minZoom && !edgeTriggered) {
+      edgeTriggered = true
+      triggerZoomLimitAnimation('in', `已放大至最大视图 (${minZoom}项)`)
+    } else if (curDist - startPinchDist < -30 && currentZoomCount.value === maxZoom && !edgeTriggered) {
+      edgeTriggered = true
+      triggerZoomLimitAnimation('out', `已缩小至全景视图 (${maxZoom}项)`)
+    } else if (targetCount > minZoom && targetCount < maxZoom) {
+      edgeTriggered = false
+    }
+
+    const boxLeft = getBoxLeft()
+    const { padLeft, plotWidth } = getPlotMetrics()
+    const pinchScreenX = (p1.clientX + p2.clientX) / 2
+    const curPinchCenterPlotX = Math.max(0, Math.min(plotWidth, pinchScreenX - boxLeft - padLeft))
+
+    currentZoomCount.value = targetCount
+    const newSpacing = plotWidth / (targetCount - 1 || 1)
+    let newScrollX = curPinchCenterPlotX - startPinchItemIdx * newSpacing
+
+    const minScroll = getMinScrollX()
+    scrollX = Math.max(minScroll, Math.min(0, newScrollX))
+
+    drawMainChart()
+    return
+  }
+
+  // 严格防护：若当前手势包含双指缩放，在所有手指完全离开屏幕前，绝对禁止退化为单指拖拽或平移
+  if (isPinching || wasPinching) {
+    return
+  }
+
+  // 单指移动
+  if (e.touches.length === 1) {
+    const curX = e.touches[0].clientX
+    const curY = e.touches[0].clientY
+    const deltaX = curX - touchStartX
+    const deltaY = curY - touchStartY
+
+    const now = Date.now()
+    const dt = now - lastTouchTime
+    if (dt > 8) {
+      velocity = (curX - lastTouchX) / dt
+      lastTouchX = curX
+      lastTouchTime = now
+    }
+
+    if (isScrubbing) {
+      handleTapSelect(curX)
+      return
+    }
+
+    if (Math.hypot(deltaX, deltaY) > 6) {
+      if (longPressTimer) {
+        clearTimeout(longPressTimer)
+        longPressTimer = null
+      }
+
+      if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 6) {
+        isDragging = true
+        const minScroll = getMinScrollX()
+        let targetScroll = touchStartScrollX + deltaX
+
+        if (targetScroll > 0) {
+          targetScroll = targetScroll * 0.28
+          if (deltaX > 20 && !edgeTriggered) {
+            edgeTriggered = true
+            triggerEdgeLimitAnimation('left', '已至最早记录')
+          }
+        } else if (targetScroll < minScroll) {
+          const over = targetScroll - minScroll
+          targetScroll = minScroll + over * 0.28
+          if (deltaX < -20 && !edgeTriggered) {
+            edgeTriggered = true
+            triggerEdgeLimitAnimation('right', '已至最新记录')
+          }
+        } else {
+          edgeTriggered = false
+        }
+
+        scrollX = targetScroll
+        drawMainChart()
+      }
+    }
+  }
+}
+
+const handleChartTouchEnd = (e: any) => {
+  lastChartTouchEndTime = Date.now()
+  if (longPressTimer) {
+    clearTimeout(longPressTimer)
+    longPressTimer = null
+  }
+
+  edgeTriggered = false
+
+  // 处理双指缩放释放流程 (单指抬起阶段与全部离开阶段)
+  if (isPinching || wasPinching) {
+    if (!e.touches || e.touches.length === 0) {
+      // 最后一根手指完全抬起，安全结束缩放会话，保持当前精确定位
+      isPinching = false
+      wasPinching = false
+      const minScroll = getMinScrollX()
+      if (scrollX > 0 || scrollX < minScroll) {
+        reboundToBoundary()
+      }
+    } else {
+      // 第一根手指先抬起，保持 wasPinching 锁定状态，等待最后一根手指离开，彻底杜绝单指滑动跳变
+      isPinching = false
+    }
+    return
+  }
+
+  if (isScrubbing) {
+    isScrubbing = false
+    return
+  }
+
+  if (isDragging) {
+    isDragging = false
+    const minScroll = getMinScrollX()
+    if (scrollX > 0 || scrollX < minScroll) {
+      reboundToBoundary()
+      return
+    }
+    if (Math.abs(velocity) > 0.22) {
+      startInertia(velocity)
+    }
+    return
+  }
+
+  handleTapSelect(touchStartX)
+}
+
+const handleChartTouchCancel = () => {
+  lastChartTouchEndTime = Date.now()
+  if (longPressTimer) {
+    clearTimeout(longPressTimer)
+    longPressTimer = null
+  }
+  edgeTriggered = false
+  isDragging = false
+  isScrubbing = false
+  isPinching = false
+  wasPinching = false
+  const minScroll = getMinScrollX()
+  if (scrollX > 0 || scrollX < minScroll) {
+    reboundToBoundary()
+  }
+}
+
+// Canvas 2D 初始化
+const initMainCanvas = (callback?: () => void) => {
+  const query = uni.createSelectorQuery().in(instance?.proxy || instance)
+  query.select('#mainChartCanvas').fields({ node: true, size: true, rect: true })
+  query.select('.main-chart-canvas-box').boundingClientRect()
+  query.exec((res) => {
+    if (res && res[0] && res[0].node) {
+      const dpr = uni.getSystemInfoSync().pixelRatio || 2
+      mainCanvasNode = res[0].node
+      mainCanvasCtx = mainCanvasNode.getContext('2d')
+      mainCanvasWidth = res[0].width
+      mainCanvasHeight = res[0].height
+      mainCanvasNode.width = mainCanvasWidth * dpr
+      mainCanvasNode.height = mainCanvasHeight * dpr
+      mainCanvasCtx.scale(dpr, dpr)
+
+      if (res[1] && typeof res[1].left === 'number') {
+        canvasBoxLeft = res[1].left
+      } else if (res[0] && typeof res[0].left === 'number') {
+        canvasBoxLeft = res[0].left
+      }
+
+      if (callback) callback()
+    }
+  })
+}
 
 const fetchCatProfile = async () => {
   try {
@@ -307,7 +1010,7 @@ const fetchRecentRecords = async () => {
           value: item.bg_value
         }
       })
-      rawGlucoseData = res.data
+      rawGlucoseData.value = res.data
       if (currentChartTab.value === 'glucose') renderChart()
     }
   } catch (err) {
@@ -320,7 +1023,7 @@ const fetchRecentWeights = async () => {
   try {
     const res = await callApi('getRecords', { catId: catInfo.value._id, type: 'weight_records', limit: 30 })
     if (res.data) {
-      rawWeightData = res.data
+      rawWeightData.value = res.data
       if (currentChartTab.value === 'weight') renderChart()
     }
   } catch (err) {
@@ -328,71 +1031,458 @@ const fetchRecentWeights = async () => {
   }
 }
 
-const switchTab = (tab: string) => {
+const switchTab = (tab: 'glucose' | 'weight') => {
   currentChartTab.value = tab
-  renderChart()
+  selectedPointIndex.value = -1
+  initPositionForCurrentChart()
+  nextTick(() => {
+    updateTrackRect()
+  })
+}
+
+const initPositionForCurrentChart = () => {
+  const total = currentChartItems.value.length
+  currentZoomCount.value = Math.min(5, Math.max(total, 3))
+  selectedPointIndex.value = -1
+  const minScroll = getMinScrollX()
+  scrollX = minScroll
+  sliderScrollRatio.value = 1.0
+  drawMainChart()
 }
 
 const renderChart = () => {
-  // 必须深拷贝，否则 qiun-data-charts 组件不会监听到数据更新
-  let newChartData = { categories: [] as string[], series: [] as any[] }
-  let newOpts = JSON.parse(JSON.stringify(chartOpts.value))
-
-  if (currentChartTab.value === 'glucose') {
-    const chartItems = [...rawGlucoseData].reverse()
-    const categories = chartItems.map(item => {
-      let dStr = ''
-      if (item.record_date && item.record_date.includes('-')) {
-        const [_, m, d] = item.record_date.split('-')
-        dStr = `${parseInt(m)}/${parseInt(d)}`
-      } else {
-        const d = new Date(item.createTime)
-        dStr = `${d.getMonth()+1}/${d.getDate()}`
-      }
-      const timeStr = item.measure_time ? ` ${item.measure_time}` : ''
-      return `${dStr}${timeStr}`
+  if (!mainCanvasCtx) {
+    initMainCanvas(() => {
+      initPositionForCurrentChart()
+      updateTrackRect()
     })
-    const dataPoints = chartItems.map(item => item.bg_value)
-    
-    newChartData = {
-      categories,
-      series: [{ name: "血糖值", data: dataPoints }]
-    }
-    newOpts.xAxis.itemCount = Math.min(5, Math.max(categories.length, 3))
-    newOpts.yAxis.data = [{ min: 0, max: 30 }]
-    newOpts.extra.markLine.data = [
-      { value: catInfo.value.targetMin, color: '#2ECC71' },
-      { value: catInfo.value.targetMax, color: '#E74C3C' }
-    ]
   } else {
-    const chartItems = [...rawWeightData].reverse()
-    const categories = chartItems.map(item => {
-      let dStr = ''
-      if (item.record_date && item.record_date.includes('-')) {
-        const [_, m, d] = item.record_date.split('-')
-        dStr = `${parseInt(m)}/${parseInt(d)}`
-      } else {
-        const d = new Date(item.createTime)
-        dStr = `${d.getMonth()+1}/${d.getDate()}`
-      }
-      const timeStr = item.measure_time ? ` ${item.measure_time}` : ''
-      return `${dStr}${timeStr}`
-    })
-    const dataPoints = chartItems.map(item => item.weight_value)
-    
-    newChartData = {
-      categories,
-      series: [{ name: "体重(kg)", data: dataPoints }]
-    }
-    const weights = rawWeightData.map(item => item.weight_value)
-    const minW = weights.length ? Math.floor(Math.min(...weights) - 1) : 0
-    const maxW = weights.length ? Math.ceil(Math.max(...weights) + 1) : 10
-    newOpts.yAxis.data = [{ min: Math.max(0, minW), max: maxW }]
-    newOpts.extra.markLine.data = []
+    initPositionForCurrentChart()
+    updateTrackRect()
+  }
+}
+
+// 统一绘制函数：支持血糖自适应高度与红绿上下限，以及体重充足呼吸余量（彻底杜绝压顶）
+const drawMainChart = () => {
+  if (!mainCanvasCtx) return
+  const ctx = mainCanvasCtx
+  const items = currentChartItems.value
+
+  ctx.clearRect(0, 0, mainCanvasWidth, mainCanvasHeight)
+  ctx.fillStyle = '#FFFFFF'
+  ctx.fillRect(0, 0, mainCanvasWidth, mainCanvasHeight)
+
+  if (!items.length) {
+    ctx.fillStyle = '#94A3B8'
+    ctx.font = '13px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText(currentChartTab.value === 'glucose' ? '暂无血糖记录' : '暂无体重记录', mainCanvasWidth / 2, mainCanvasHeight / 2)
+    return
   }
 
-  chartData.value = JSON.parse(JSON.stringify(newChartData))
-  chartOpts.value = newOpts
+  const { padLeft, padRight, spacing } = getPlotMetrics()
+  const topY = currentChartTab.value === 'glucose' ? 28 : 34
+  const bottomY = mainCanvasHeight - 26
+
+  // 同步更新原生滚动条滑块的响应式比率，确保视觉位置与图表 100% 实时同步
+  const minScroll = getMinScrollX()
+  if (minScroll >= 0) {
+    sliderScrollRatio.value = 1.0
+  } else {
+    const r = scrollX / minScroll
+    sliderScrollRatio.value = Math.max(0, Math.min(1, r))
+  }
+
+  if (currentChartTab.value === 'glucose') {
+    // 血糖图表渲染
+    const numericBgs = items.map(i => i.value).filter(v => typeof v === 'number' && v > 0)
+    const maxBg = numericBgs.length ? Math.max(...numericBgs) : 15.0
+
+    let ceiling = 20
+    if (maxBg <= 18.0) ceiling = 20
+    else if (maxBg <= 23.0) ceiling = 25
+    else if (maxBg <= 28.0) ceiling = 30
+    else if (maxBg <= 33.0) ceiling = 35
+    else ceiling = Math.ceil((maxBg + 2) / 5) * 5
+
+    const getY = (bg: number) => {
+      const clamped = Math.max(0, Math.min(ceiling, bg))
+      return bottomY - (clamped / ceiling) * (bottomY - topY)
+    }
+
+    // 1. 虚线网格
+    ctx.lineWidth = 1
+    ctx.setLineDash([3, 3])
+    ctx.strokeStyle = '#E2E8F0'
+
+    let gridSteps: number[] = []
+    if (ceiling === 20) gridSteps = [15, 10, 5]
+    else if (ceiling === 25) gridSteps = [20, 15, 10, 5]
+    else if (ceiling === 30) gridSteps = [20, 10]
+    else if (ceiling === 35) gridSteps = [25, 15, 5]
+    else {
+      const step = Math.ceil(ceiling / 4)
+      gridSteps = [step * 3, step * 2, step]
+    }
+
+    gridSteps.forEach(v => {
+      const y = getY(v)
+      ctx.beginPath()
+      ctx.moveTo(padLeft, y)
+      ctx.lineTo(padRight, y)
+      ctx.stroke()
+
+      ctx.fillStyle = '#94A3B8'
+      ctx.font = '10px sans-serif'
+      ctx.textAlign = 'right'
+      ctx.fillText(`${v}`, padLeft - 6, y + 3)
+    })
+
+    // 顶线与上限刻度
+    ctx.beginPath()
+    ctx.moveTo(padLeft, topY)
+    ctx.lineTo(padRight, topY)
+    ctx.stroke()
+    ctx.fillStyle = '#94A3B8'
+    ctx.font = '10px sans-serif'
+    ctx.textAlign = 'right'
+    ctx.fillText(`${ceiling}`, padLeft - 6, topY + 3)
+
+    // 底线与 0 刻度
+    ctx.setLineDash([])
+    ctx.strokeStyle = '#CBD5E1'
+    ctx.beginPath()
+    ctx.moveTo(padLeft, bottomY)
+    ctx.lineTo(padRight, bottomY)
+    ctx.stroke()
+    ctx.fillText('0', padLeft - 6, bottomY + 3)
+
+    // 目标参考线：上限红色虚线，下限绿色虚线 (纯净线条，无文字标签)
+    const targetMax = catInfo.value.targetMax || 15.0
+    const targetMin = catInfo.value.targetMin || 4.0
+
+    const yMax = getY(targetMax)
+    ctx.setLineDash([4, 2])
+    ctx.strokeStyle = '#FCA5A5'
+    ctx.beginPath()
+    ctx.moveTo(padLeft, yMax)
+    ctx.lineTo(padRight, yMax)
+    ctx.stroke()
+
+    const yMin = getY(targetMin)
+    ctx.strokeStyle = '#86EFAC'
+    ctx.beginPath()
+    ctx.moveTo(padLeft, yMin)
+    ctx.lineTo(padRight, yMin)
+    ctx.stroke()
+    ctx.setLineDash([])
+
+    // 2. 剪裁区域：绘制选中高亮柱、折线、数据点与数值
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(padLeft - 2, 2, mainCanvasWidth - (padLeft - 2) - 2, bottomY - 2 + 6)
+    ctx.clip()
+
+    if (selectedPointIndex.value >= 0 && selectedPointIndex.value < items.length) {
+      const selX = padLeft + selectedPointIndex.value * spacing + scrollX
+      const beamW = 28
+      ctx.fillStyle = 'rgba(59, 130, 246, 0.08)'
+      ctx.fillRect(selX - beamW / 2, topY - 5, beamW, bottomY - topY + 10)
+
+      ctx.setLineDash([3, 3])
+      ctx.strokeStyle = 'rgba(59, 130, 246, 0.5)'
+      ctx.beginPath()
+      ctx.moveTo(selX, topY - 5)
+      ctx.lineTo(selX, bottomY)
+      ctx.stroke()
+      ctx.setLineDash([])
+    }
+
+    // 折线
+    const validPoints: { x: number, y: number }[] = []
+    items.forEach((item, i) => {
+      if (item.value !== null && typeof item.value === 'number' && item.value > 0) {
+        const x = padLeft + i * spacing + scrollX
+        validPoints.push({ x, y: getY(item.value) })
+      }
+    })
+
+    if (validPoints.length > 0) {
+      ctx.beginPath()
+      ctx.strokeStyle = '#64748B'
+      ctx.lineWidth = 2.2
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+
+      ctx.moveTo(validPoints[0].x, validPoints[0].y)
+      for (let j = 1; j < validPoints.length; j++) {
+        ctx.lineTo(validPoints[j].x, validPoints[j].y)
+      }
+      ctx.stroke()
+    }
+
+    // 数据点与数值 (按血糖标准着色)
+    const showNumbers = currentZoomCount.value <= 8
+    const dotR = currentZoomCount.value <= 4 ? 5 : 3.8
+
+    items.forEach((item, i) => {
+      const x = padLeft + i * spacing + scrollX
+      if (x < padLeft - 30 || x > padRight + 30) return
+
+      if (item.value !== null && typeof item.value === 'number' && item.value > 0) {
+        const y = getY(item.value)
+        const meta = getStatusMeta(item.value)
+
+        ctx.beginPath()
+        ctx.arc(x, y, dotR, 0, Math.PI * 2)
+        ctx.fillStyle = meta.color
+        ctx.fill()
+        ctx.lineWidth = 1.6
+        ctx.strokeStyle = '#FFFFFF'
+        ctx.stroke()
+
+        if (showNumbers) {
+          ctx.fillStyle = meta.color
+          ctx.font = 'bold 11px sans-serif'
+          const textStr = item.value.toFixed(1)
+          const numW = (ctx.measureText ? ctx.measureText(textStr).width : 0) || 24
+          const halfNumW = numW / 2
+
+          let drawNumX = x
+          const safeTextLeft = padLeft - 2 + halfNumW
+          const safeTextRight = mainCanvasWidth - 4 - halfNumW
+          if (drawNumX < safeTextLeft && x >= padLeft - 6) {
+            drawNumX = safeTextLeft
+          } else if (drawNumX > safeTextRight && x <= padRight + 10) {
+            drawNumX = safeTextRight
+          }
+
+          const textY = Math.max(16, y - 7)
+          ctx.textAlign = 'center'
+          ctx.fillText(textStr, drawNumX, textY)
+        }
+      }
+    })
+    ctx.restore()
+
+    // 3. X 轴日期刻度
+    items.forEach((item, i) => {
+      const x = padLeft + i * spacing + scrollX
+      if (x < padLeft - 35 || x > padRight + 35) return
+
+      let showX = true
+      if (currentZoomCount.value > 12) {
+        showX = (i === 0 || i % 2 === 0 || i === items.length - 1)
+      }
+
+      if (showX) {
+        const isCur = selectedPointIndex.value === i
+        ctx.fillStyle = isCur ? '#0F172A' : '#64748B'
+        ctx.font = isCur ? 'bold 11px sans-serif' : '10px sans-serif'
+
+        const textW = (ctx.measureText ? ctx.measureText(item.dayNum).width : 0) || 28
+        const halfW = textW / 2
+        let drawX = x
+        const safeLeft = padLeft - 2
+        const safeRight = mainCanvasWidth - 6
+        if (drawX - halfW < safeLeft) {
+          drawX = safeLeft + halfW
+        } else if (drawX + halfW > safeRight) {
+          drawX = safeRight - halfW
+        }
+
+        ctx.textAlign = 'center'
+        ctx.fillText(item.dayNum, drawX, bottomY + 16)
+      }
+    })
+  } else {
+    // 体重图表渲染 (解决压顶问题，支持充足呼吸余量与网格)
+    const validWts = items
+      .filter(i => typeof i.value === 'number' && i.value > 0)
+      .map(i => i.value as number)
+
+    let minWeight = 3.0
+    let maxWeight = 6.0
+
+    if (validWts.length > 0) {
+      const dataMin = Math.min(...validWts)
+      const dataMax = Math.max(...validWts)
+
+      // 保证高于最大数据点至少 0.8~1.0kg 空间，彻底杜绝压顶现象
+      if (dataMax > 5.2) {
+        maxWeight = Math.ceil((dataMax + 0.8) * 2) / 2
+      } else {
+        maxWeight = 6.0
+      }
+
+      if (dataMin < 3.0) {
+        minWeight = Math.max(0, Math.floor((dataMin - 0.8) * 2) / 2)
+      } else if (dataMin >= 5.0 && minWeight === 3.0) {
+        minWeight = Math.floor((dataMin - 0.8) * 2) / 2
+      }
+    }
+
+    if (maxWeight - minWeight < 2.0) {
+      const mid = (maxWeight + minWeight) / 2
+      minWeight = Math.max(0, Math.floor((mid - 1.0) * 2) / 2)
+      maxWeight = minWeight + 2.0
+    }
+
+    const weightSpan = maxWeight - minWeight
+    const getY = (wt: number) => {
+      const clamped = Math.max(minWeight, Math.min(maxWeight, wt))
+      return bottomY - ((clamped - minWeight) / weightSpan) * (bottomY - topY)
+    }
+
+    // 1. 固定网格与 Y 轴刻度
+    ctx.lineWidth = 1
+    ctx.setLineDash([3, 3])
+    ctx.strokeStyle = '#E2E8F0'
+
+    const midWeight = Number(((minWeight + maxWeight) / 2).toFixed(1))
+    const gridSteps = [maxWeight, midWeight]
+
+    gridSteps.forEach(v => {
+      const y = getY(v)
+      ctx.beginPath()
+      ctx.moveTo(padLeft, y)
+      ctx.lineTo(padRight, y)
+      ctx.stroke()
+
+      ctx.fillStyle = '#94A3B8'
+      ctx.font = '10px sans-serif'
+      ctx.textAlign = 'right'
+      ctx.fillText(v.toFixed(1), padLeft - 6, y + 3)
+    })
+
+    // 基线与刻度
+    ctx.setLineDash([])
+    ctx.strokeStyle = '#CBD5E1'
+    ctx.beginPath()
+    ctx.moveTo(padLeft, bottomY)
+    ctx.lineTo(padRight, bottomY)
+    ctx.stroke()
+    ctx.fillText(minWeight.toFixed(1), padLeft - 6, bottomY + 3)
+
+    // 2. 剪裁区域
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(padLeft - 2, 2, mainCanvasWidth - (padLeft - 2) - 2, bottomY - 2 + 6)
+    ctx.clip()
+
+    if (selectedPointIndex.value >= 0 && selectedPointIndex.value < items.length) {
+      const selX = padLeft + selectedPointIndex.value * spacing + scrollX
+      const beamW = 28
+      ctx.fillStyle = 'rgba(59, 130, 246, 0.08)'
+      ctx.fillRect(selX - beamW / 2, topY - 5, beamW, bottomY - topY + 10)
+
+      ctx.setLineDash([3, 3])
+      ctx.strokeStyle = 'rgba(59, 130, 246, 0.5)'
+      ctx.beginPath()
+      ctx.moveTo(selX, topY - 5)
+      ctx.lineTo(selX, bottomY)
+      ctx.stroke()
+      ctx.setLineDash([])
+    }
+
+    // 绘制体重蓝色折线
+    const validPoints: { x: number, y: number }[] = []
+    items.forEach((item, i) => {
+      if (item.value !== null && typeof item.value === 'number' && item.value > 0) {
+        const x = padLeft + i * spacing + scrollX
+        validPoints.push({ x, y: getY(item.value) })
+      }
+    })
+
+    if (validPoints.length > 0) {
+      ctx.beginPath()
+      ctx.strokeStyle = '#3B82F6'
+      ctx.lineWidth = 2.2
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+
+      ctx.moveTo(validPoints[0].x, validPoints[0].y)
+      for (let j = 1; j < validPoints.length; j++) {
+        ctx.lineTo(validPoints[j].x, validPoints[j].y)
+      }
+      ctx.stroke()
+    }
+
+    // 绘制体重点与数值
+    const showNumbers = currentZoomCount.value <= 8
+    const dotR = currentZoomCount.value <= 4 ? 4.8 : 3.5
+
+    items.forEach((item, i) => {
+      const x = padLeft + i * spacing + scrollX
+      if (x < padLeft - 30 || x > padRight + 30) return
+
+      if (item.value !== null && typeof item.value === 'number' && item.value > 0) {
+        const y = getY(item.value)
+
+        ctx.beginPath()
+        ctx.arc(x, y, dotR, 0, Math.PI * 2)
+        ctx.fillStyle = '#3B82F6'
+        ctx.fill()
+        ctx.lineWidth = 1.6
+        ctx.strokeStyle = '#FFFFFF'
+        ctx.stroke()
+
+        if (showNumbers) {
+          ctx.fillStyle = '#2563EB'
+          ctx.font = 'bold 11px sans-serif'
+          const textStr = item.value.toFixed(2)
+          const numW = (ctx.measureText ? ctx.measureText(textStr).width : 0) || 24
+          const halfNumW = numW / 2
+
+          let drawNumX = x
+          const safeTextLeft = padLeft - 2 + halfNumW
+          const safeTextRight = mainCanvasWidth - 4 - halfNumW
+          if (drawNumX < safeTextLeft && x >= padLeft - 6) {
+            drawNumX = safeTextLeft
+          } else if (drawNumX > safeTextRight && x <= padRight + 10) {
+            drawNumX = safeTextRight
+          }
+
+          // 充足呼吸余量：保证数字与点绝不上溢压顶
+          const textY = Math.max(16, y - 7)
+          ctx.textAlign = 'center'
+          ctx.fillText(textStr, drawNumX, textY)
+        }
+      }
+    })
+    ctx.restore()
+
+    // 3. X 轴日期刻度
+    items.forEach((item, i) => {
+      const x = padLeft + i * spacing + scrollX
+      if (x < padLeft - 35 || x > padRight + 35) return
+
+      let showX = true
+      if (currentZoomCount.value > 12) {
+        showX = (i === 0 || i % 2 === 0 || i === items.length - 1)
+      }
+
+      if (showX) {
+        const isCur = selectedPointIndex.value === i
+        ctx.fillStyle = isCur ? '#0F172A' : '#64748B'
+        ctx.font = isCur ? 'bold 11px sans-serif' : '10px sans-serif'
+
+        const textW = (ctx.measureText ? ctx.measureText(item.dayNum).width : 0) || 28
+        const halfW = textW / 2
+        let drawX = x
+        const safeLeft = padLeft - 2
+        const safeRight = mainCanvasWidth - 6
+        if (drawX - halfW < safeLeft) {
+          drawX = safeLeft + halfW
+        } else if (drawX + halfW > safeRight) {
+          drawX = safeRight - halfW
+        }
+
+        ctx.textAlign = 'center'
+        ctx.fillText(item.dayNum, drawX, bottomY + 16)
+      }
+    })
+  }
 }
 
 const fetchRecentInsulins = async () => {
@@ -444,8 +1534,8 @@ const formatDisplayTime = (date: Date) => {
 const loadAllData = async () => {
   await fetchCatProfile()
   if (catInfo.value._id || allCats.value.length === 0) {
-    // 静默执行自动喂食机对齐补录
-    await checkAndSyncAutoFeeder(catInfo.value._id)
+    // 异步后台静默执行自动喂食机对齐补录，不阻塞核心健康数据拉取
+    checkAndSyncAutoFeeder(catInfo.value._id).catch(() => {})
     fetchRecentRecords()
     fetchRecentInsulins()
     fetchRecentWeights()
@@ -454,11 +1544,19 @@ const loadAllData = async () => {
 
 onShow(() => {
   loadAllData()
+  nextTick(() => {
+    setTimeout(() => {
+      initMainCanvas(() => {
+        initPositionForCurrentChart()
+        updateTrackRect()
+      })
+    }, 80)
+  })
 })
 
 const handleSwitchCat = () => {
   const itemList = allCats.value.map(c => c.name || '未命名')
-  itemList.push('➕ 新增猫咪')
+  itemList.push('+ 新增猫咪')
   uni.showActionSheet({
     itemList,
     success: (res) => {
@@ -508,18 +1606,23 @@ const getGlucoseClass = (val: number) => {
   const warningMax = max * 1.3 // 动态超标 30% 缓冲阈值
 
   if (val < min) {
-    return 'text-danger' // 🔴 红色：低于自定义目标下限 (低血糖急症)
+    return 'text-danger' // 红色：低于自定义目标下限 (低血糖急症)
   } else if (val <= max) {
-    return 'text-safe' // 🟢 绿色：安全达标区间 [min, max]
+    return 'text-safe' // 绿色：安全达标区间 [min, max]
   } else if (val <= warningMax) {
-    return 'text-warning' // 🟡 黄色：超出目标上限 30% 以内 (轻中度偏高，需观察)
+    return 'text-warning' // 黄色：超出目标上限 30% 以内 (轻中度偏高，需观察)
   } else {
-    return 'text-danger' // 🔴 红色：超出目标上限 30% 以上 (严重高血糖预警)
+    return 'text-danger' // 红色：超出目标上限 30% 以上 (严重高血糖预警)
   }
 }
 </script>
 
 <style scoped>
+.container {
+  min-height: 100vh;
+  box-sizing: border-box;
+}
+
 /* 头部样式 */
 .header {
   display: flex;
@@ -583,6 +1686,28 @@ const getGlucoseClass = (val: number) => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 24rpx;
+}
+.chart-fullscreen-btn {
+  padding: 8rpx 14rpx;
+  background: #F8FAFC;
+  border: 2rpx solid #E2E8F0;
+  border-radius: 16rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+.chart-fullscreen-btn:active {
+  transform: scale(0.92);
+  background: #EDF2F7;
+}
+.icon-chart-bars {
+  width: 34rpx;
+  height: 34rpx;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2364748B'%3E%3Crect x='3' y='11' width='3.2' height='10' rx='1.6'/%3E%3Crect x='8.5' y='14' width='3.2' height='7' rx='1.6'/%3E%3Crect x='14' y='7' width='3.2' height='14' rx='1.6'/%3E%3Crect x='19.5' y='3' width='3.2' height='18' rx='1.6'/%3E%3C/svg%3E");
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
 }
 .card-title {
   font-size: 32rpx;
@@ -698,10 +1823,177 @@ const getGlucoseClass = (val: number) => {
   line-height: 1.2;
 }
 
-/* 图表占位 */
-.chart-placeholder {
-  height: 450rpx;
+/* 原生 Canvas 2D 图表容器 */
+.main-chart-canvas-box {
   width: 100%;
+  height: 440rpx;
+  background-color: #FFFFFF;
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+  transition: transform 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+.main-chart-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* 选中数据点详细浮层 (高亮横条) */
+.selected-point-badge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: #F8FAFC;
+  border: 1.5rpx solid #E2E8F0;
+  border-radius: 12rpx;
+  padding: 8rpx 18rpx;
+  margin-bottom: 12rpx;
+  animation: fadeIn 0.15s ease;
+}
+.spb-date {
+  font-size: 22rpx;
+  color: #64748B;
+  font-weight: 500;
+}
+.spb-right {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+.spb-val {
+  font-size: 24rpx;
+  font-weight: 700;
+}
+.spb-status {
+  font-size: 20rpx;
+  font-weight: 600;
+  padding: 2rpx 12rpx;
+  border-radius: 6rpx;
+}
+
+/* 状态徽章背景与文字颜色 */
+.badge-green {
+  background-color: #F0FDF4;
+  color: #16A34A;
+  border: 2rpx solid #DCFCE7;
+}
+.badge-yellow {
+  background-color: #FEFCE8;
+  color: #CA8A04;
+  border: 2rpx solid #FEF08A;
+}
+.badge-red {
+  background-color: #FEF2F2;
+  color: #DC2626;
+  border: 2rpx solid #FECACA;
+}
+.badge-blue {
+  background-color: #EFF6FF;
+  color: #2563EB;
+  border: 2rpx solid #DBEAFE;
+}
+.badge-gray {
+  background-color: #F1F5F9;
+  color: #94A3B8;
+  border: 2rpx solid #E2E8F0;
+}
+
+/* 边界触底与缩放极限轻量提示 Toast */
+.chart-limit-toast {
+  position: absolute;
+  top: 96rpx;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(8px);
+  padding: 6rpx 22rpx;
+  border-radius: 100rpx;
+  z-index: 100;
+  pointer-events: none;
+  animation: toastFadeIn 0.2s ease;
+}
+.chart-limit-toast-text {
+  font-size: 20rpx;
+  color: #FFFFFF;
+  font-weight: 500;
+}
+@keyframes toastFadeIn {
+  from { opacity: 0; transform: translate(-50%, -8rpx); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* 边缘触底微弹性轻晃反馈 */
+@keyframes edgeBounceLeft {
+  0% { transform: translateX(0); }
+  35% { transform: translateX(12rpx); }
+  70% { transform: translateX(-3rpx); }
+  100% { transform: translateX(0); }
+}
+@keyframes edgeBounceRight {
+  0% { transform: translateX(0); }
+  35% { transform: translateX(-12rpx); }
+  70% { transform: translateX(3rpx); }
+  100% { transform: translateX(0); }
+}
+.edge-limit-left {
+  animation: edgeBounceLeft 0.26s cubic-bezier(0.25, 1, 0.5, 1) !important;
+}
+.edge-limit-right {
+  animation: edgeBounceRight 0.26s cubic-bezier(0.25, 1, 0.5, 1) !important;
+}
+
+/* 缩放极限弹性震荡动画 */
+.zoom-limit-in {
+  transform: scale(1.036) !important;
+  transition: transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.25) !important;
+}
+.zoom-limit-out {
+  transform: scale(0.964) !important;
+  transition: transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.25) !important;
+}
+
+/* 原生灰色风格的可拖动进度条 */
+.chart-slider-wrapper {
+  margin-top: 4rpx;
+  padding: 0 20rpx 10rpx 76rpx;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+}
+
+.chart-slider-track {
+  width: 100%;
+  height: 36rpx;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.chart-slider-rail {
+  width: 100%;
+  height: 8rpx;
+  background-color: #EFEBEF;
+  border-radius: 4rpx;
+}
+
+.chart-slider-thumb {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 8rpx;
+  background-color: #A6A6A6;
+  border-radius: 4rpx;
+  transition: background-color 0.15s ease;
+
+  &.active {
+    background-color: #7E7E7E;
+    height: 10rpx;
+  }
 }
 
 /* 列表样式 */

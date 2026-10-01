@@ -292,10 +292,10 @@ const getBgColorClass = (value: number) => {
   const max = targetMax.value
   const warningMax = max * 1.3 // 动态超标 30% 缓冲阈值
 
-  if (value < min) return 'text-danger' // 🔴 红色: 低于自定义目标下限 (低血糖急症)
-  if (value <= max) return 'text-normal' // 🟢 绿色: 落在自定义安全目标区间 [targetMin, targetMax] 内
-  if (value <= warningMax) return 'text-warning' // 🟡 黄色: 超出目标上限 30% 以内 (轻中度偏高，需观察)
-  return 'text-danger' // 🔴 红色: 超出目标上限 30% 以上 (严重高血糖预警)
+  if (value < min) return 'text-danger' // 红色: 低于自定义目标下限 (低血糖急症)
+  if (value <= max) return 'text-normal' // 绿色: 落在自定义安全目标区间 [targetMin, targetMax] 内
+  if (value <= warningMax) return 'text-warning' // 黄色: 超出目标上限 30% 以内 (轻中度偏高，需观察)
+  return 'text-danger' // 红色: 超出目标上限 30% 以上 (严重高血糖预警)
 }
 </script>
 

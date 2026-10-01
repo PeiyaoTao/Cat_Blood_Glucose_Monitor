@@ -1,6 +1,6 @@
 {
   "name": "uni-preset-vue",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "scripts": {
     "dev:custom": "uni -p",
     "dev:h5": "uni",
@@ -29,12 +29,13 @@
     "build:mp-qq": "uni build -p mp-qq",
     "build:mp-toutiao": "uni build -p mp-toutiao",
     "build:mp-harmony": "uni build -p mp-harmony",
-    "build:mp-weixin": "uni build -p mp-weixin",
+    "build:mp-weixin": "uni build -p mp-weixin && node ensure-stubs.js",
     "build:mp-xhs": "uni build -p mp-xhs",
     "build:quickapp-webview": "uni build -p quickapp-webview",
     "build:quickapp-webview-huawei": "uni build -p quickapp-webview-huawei",
     "build:quickapp-webview-union": "uni build -p quickapp-webview-union",
-    "type-check": "vue-tsc --noEmit"
+    "type-check": "vue-tsc --noEmit",
+    "postinstall": "node patch-ucharts.js"
   },
   "dependencies": {
     "@dcloudio/uni-app": "3.0.0-4080420251103001",

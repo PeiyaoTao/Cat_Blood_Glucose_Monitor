@@ -16,8 +16,7 @@
       
       <!-- 本人及其他成员统一列表 -->
       <view class="member-item" v-for="(member, index) in familyMembers" :key="index">
-        <image v-if="member.avatarUrl" class="avatar-img" :src="member.avatarUrl" mode="aspectFill"></image>
-        <text v-else class="emoji">👤</text>
+        <image class="avatar-img" :src="member.avatarUrl || 'https://api.dicebear.com/7.x/notionists/svg?seed=Family'" mode="aspectFill"></image>
         <view class="info">
           <text class="name">{{ member.nickName }}</text>
           <text class="role">{{ member.displayRole }}</text>
