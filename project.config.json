@@ -1,5 +1,5 @@
 {
-  "description": "项目配置文件。",
+  "description": "猫咪控糖日记 - 微信小程序项目配置",
   "miniprogramRoot": "frontend/dist/build/mp-weixin/",
   "cloudfunctionRoot": "cloudfunctions/",
   "packOptions": {
@@ -47,7 +47,7 @@
   "compileType": "miniprogram",
   "libVersion": "latest",
   "appid": "wx3e7f4323e6714649",
-  "projectname": "%E5%B0%8F%E7%A8%8B%E5%BA%8F%E7%A4%BA%E4%BE%8B",
+  "projectname": "%E7%8C%AB%E5%92%AA%E6%8E%A7%E7%B3%96%E6%97%A5%E8%AE%B0",
   "simulatorType": "wechat",
   "simulatorPluginLibVersion": {},
   "condition": {},

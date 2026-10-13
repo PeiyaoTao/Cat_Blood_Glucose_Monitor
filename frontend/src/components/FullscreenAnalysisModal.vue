@@ -218,7 +218,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, getCurrentInstance } from 'vue'
+import { ref, computed, watch, nextTick, getCurrentInstance, onUnmounted } from 'vue'
+import { useChartGestures } from '@/composables/useChartGestures'
 
 const props = defineProps<{
   visible: boolean
@@ -796,7 +797,6 @@ const glucoseStatusClass = computed(() => {
 // 连续平滑像素级滚动与惯性物理引擎 (完美复刻首页 u-charts 丝滑手感)
 // ========================================================
 let scrollX = 0
-let animTimer: any = null
 
 const getPlotMetrics = () => {
   const padLeft = 38
@@ -847,10 +847,7 @@ const initPositionForCurrentTab = () => {
 
 // 快速血糖趋势分析快捷缩放与定位 [ 近7天 | 近14天 | 近30天 | 全部 ]
 const applyQuickRange = (range: '7d' | '14d' | '30d' | 'all') => {
-  if (animTimer) {
-    clearTimeout(animTimer)
-    animTimer = null
-  }
+  gestures.stopAnimation()
 
   currentQuickRange.value = range
   selectedPointIndex.value = -1
@@ -1398,25 +1395,6 @@ const drawWeightChart = (
   })
 }
 
-// 手势交互处理状态机 (连续像素级跟手 + 惯性滑行 + 边界弹性回弹，完全移除震动调用)
-let touchStartX = 0
-let touchStartY = 0
-let touchStartScrollX = 0
-let lastTouchX = 0
-let lastTouchTime = 0
-let lastChartTouchEndTime = 0
-let velocity = 0
-let isDragging = false
-let isScrubbing = false
-let isPinching = false
-let wasPinching = false
-let startPinchDist = 0
-let startZoomCount = 7
-let startPinchCenterPlotX = 0
-let startPinchItemIdx = 0
-let longPressTimer: any = null
-let edgeTriggered = false
-
 const getBoxLeft = () => {
   if (canvasBoxLeft > 0) return canvasBoxLeft
   try {
@@ -1425,118 +1403,6 @@ const getBoxLeft = () => {
   } catch (e) {
     return 18
   }
-}
-
-// 单点触碰选择
-const handleTapSelect = (clientX: number) => {
-  const fullList = getFullListForCurrentTab()
-  if (!fullList.length) return
-  const boxLeft = getBoxLeft()
-  const { padLeft, padRight, spacing } = getPlotMetrics()
-  const clickX = clientX - boxLeft
-
-  let closestIdx = -1
-  let minDiff = 99999
-  fullList.forEach((_, i) => {
-    const x = padLeft + i * spacing + scrollX
-    const diff = Math.abs(x - clickX)
-    if (diff < minDiff) {
-      minDiff = diff
-      closestIdx = i
-    }
-  })
-
-  const hitRadius = Math.max(22, spacing / 2)
-  if (closestIdx !== -1 && minDiff <= hitRadius) {
-    selectedPointIndex.value = closestIdx
-    drawBothCharts()
-  } else {
-    if (selectedPointIndex.value !== -1) {
-      selectedPointIndex.value = -1
-      drawBothCharts()
-    }
-  }
-}
-
-// 边界弹性回弹动画 (ease-out cubic 优雅收敛)
-const reboundToBoundary = () => {
-  if (animTimer) {
-    clearTimeout(animTimer)
-    animTimer = null
-  }
-  const minScrollX = getMinScrollX()
-  const target = scrollX > 0 ? 0 : minScrollX
-  const start = scrollX
-  const startTime = Date.now()
-  const duration = 240
-
-  const stepAnim = () => {
-    const elapsed = Date.now() - startTime
-    const progress = Math.min(1, elapsed / duration)
-    const ease = 1 - Math.pow(1 - progress, 3)
-    scrollX = start + (target - start) * ease
-    drawBothCharts()
-    updateVisibleMetrics()
-
-    if (progress < 1) {
-      animTimer = setTimeout(stepAnim, 16)
-    } else {
-      scrollX = target
-      drawBothCharts()
-      updateVisibleMetrics()
-      animTimer = null
-    }
-  }
-  stepAnim()
-}
-
-// 惯性滑行减速物理动画
-const startInertia = (initVelocity: number) => {
-  if (animTimer) {
-    clearTimeout(animTimer)
-    animTimer = null
-  }
-  let v = initVelocity * 14
-  if (v > 25) v = 25
-  if (v < -25) v = -25
-
-  const friction = 0.92
-
-  const stepFlick = () => {
-    if (Math.abs(v) < 0.4) {
-      animTimer = null
-      const minScrollX = getMinScrollX()
-      if (scrollX > 0 || scrollX < minScrollX) {
-        reboundToBoundary()
-      }
-      return
-    }
-
-    v *= friction
-    scrollX += v
-    const minScrollX = getMinScrollX()
-
-    if (scrollX > 0) {
-      scrollX *= 0.6
-      v *= 0.5
-    } else if (scrollX < minScrollX) {
-      const over = scrollX - minScrollX
-      scrollX = minScrollX + over * 0.6
-      v *= 0.5
-    }
-
-    drawBothCharts()
-    updateVisibleMetrics()
-
-    if (scrollX > 20 || scrollX < minScrollX - 20) {
-      animTimer = null
-      reboundToBoundary()
-      return
-    }
-
-    animTimer = setTimeout(stepFlick, 16)
-  }
-  stepFlick()
 }
 
 // 触发缩放极值回弹动画
@@ -1549,258 +1415,55 @@ const triggerZoomLimitAnimation = (type: 'in' | 'out', tipText?: string) => {
   }, 240)
 }
 
-const handleTouchStart = (e: any) => {
-  if (!e.touches) return
-  edgeTriggered = false
-  if (animTimer) {
-    clearTimeout(animTimer)
-    animTimer = null
-  }
-
-  // 1. 双指按下 -> 准备双指平滑缩放
-  if (e.touches.length === 2) {
-    if (longPressTimer) {
-      clearTimeout(longPressTimer)
-      longPressTimer = null
-    }
-    isScrubbing = false
-    isDragging = false
-    isPinching = true
-    wasPinching = true
-    const p1 = e.touches[0]
-    const p2 = e.touches[1]
-    startPinchDist = Math.hypot(p1.clientX - p2.clientX, p1.clientY - p2.clientY)
-    startZoomCount = currentZoomCount.value
-
-    const boxLeft = getBoxLeft()
-    const { padLeft, plotWidth, spacing } = getPlotMetrics()
-    const pinchScreenX = (p1.clientX + p2.clientX) / 2
-    startPinchCenterPlotX = Math.max(0, Math.min(plotWidth, pinchScreenX - boxLeft - padLeft))
-    startPinchItemIdx = (-scrollX + startPinchCenterPlotX) / (spacing || 1)
-    edgeTriggered = false
-    return
-  }
-
-  // 2. 单指按下
-  if (e.touches.length === 1) {
-    // 若当前手势包含缩放，在所有手指彻底离开前，绝对不初始化单指参数
-    if (isPinching || wasPinching) {
-      return
-    }
-    touchStartX = e.touches[0].clientX
-    touchStartY = e.touches[0].clientY
-    touchStartScrollX = scrollX
-    lastTouchX = touchStartX
-    lastTouchTime = Date.now()
-    velocity = 0
-    isDragging = false
-    isScrubbing = false
-    isPinching = false
-    wasPinching = false
-
-    if (longPressTimer) {
-      clearTimeout(longPressTimer)
-      longPressTimer = null
-    }
-
-    // 启动长按识别定时器 (按住 220ms 触发进入滑动选点模式)
-    longPressTimer = setTimeout(() => {
-      longPressTimer = null
-      isScrubbing = true
-      handleTapSelect(touchStartX)
-    }, 220)
-  }
-}
-
-const handleTouchMove = (e: any) => {
-  if (!e.touches) return
-
-  // 1. 双指手势缩放 (以双指中心点为几何锚点，保持当前缩放数据点位置不动)
-  if (e.touches.length === 2 && isPinching) {
-    const p1 = e.touches[0]
-    const p2 = e.touches[1]
-    const curDist = Math.hypot(p1.clientX - p2.clientX, p1.clientY - p2.clientY)
-    const diff = curDist - startPinchDist
-    const limits = getTabZoomLimits()
-
-    const deltaUnits = Math.round(-diff / 22)
-    let targetCount = startZoomCount + deltaUnits
-    targetCount = Math.max(limits.min, Math.min(limits.max, targetCount))
-
-    if (curDist - startPinchDist > 35 && currentZoomCount.value === limits.min && !edgeTriggered) {
-      edgeTriggered = true
-      triggerZoomLimitAnimation('in', `已放大至最大视图 (${limits.min}项)`)
-    } else if (curDist - startPinchDist < -35 && currentZoomCount.value === limits.max && !edgeTriggered) {
-      edgeTriggered = true
-      triggerZoomLimitAnimation('out', `已缩小至全景视图 (${limits.max}项)`)
-    } else if (targetCount > limits.min && targetCount < limits.max) {
-      edgeTriggered = false
-    }
-
-    const boxLeft = getBoxLeft()
-    const { padLeft, plotWidth } = getPlotMetrics()
-    const pinchScreenX = (p1.clientX + p2.clientX) / 2
-    const curPinchCenterPlotX = Math.max(0, Math.min(plotWidth, pinchScreenX - boxLeft - padLeft))
-
-    currentZoomCount.value = targetCount
-    const newSpacing = plotWidth / (targetCount - 1 || 1)
-    let newScrollX = curPinchCenterPlotX - startPinchItemIdx * newSpacing
-
-    const minScrollX = getMinScrollX()
-    scrollX = Math.max(minScrollX, Math.min(0, newScrollX))
-
-    if (currentTab.value === 'day') {
-      if (targetCount === 7) currentQuickRange.value = '7d'
-      else if (targetCount === 14) currentQuickRange.value = '14d'
-      else if (targetCount === 30) currentQuickRange.value = '30d'
-      else if (targetCount === processedDayItems.value.length) currentQuickRange.value = 'all'
-      else currentQuickRange.value = ''
-    }
-
+// 图表手势引擎（与首页图表共用，见 composables/useChartGestures.ts）
+const gestures = useChartGestures({
+  zoomCount: currentZoomCount,
+  selectedIndex: selectedPointIndex,
+  getScrollX: () => scrollX,
+  setScrollX: (x: number) => { scrollX = x },
+  getItemCount: () => getFullListForCurrentTab().length,
+  getPlotMetrics,
+  getMinScrollX,
+  getBoxLeft,
+  getZoomLimits: () => getTabZoomLimits(),
+  redraw: () => {
     drawBothCharts()
     updateVisibleMetrics()
-    return
-  }
-
-  // 严格防护：若当前手势包含双指缩放，在所有手指完全离开屏幕前，绝对禁止退化为单指拖拽或平移
-  if (isPinching || wasPinching) {
-    return
-  }
-
-  // 2. 单指移动 (1:1绝对物理平滑滚动，毫秒级即时响应，与首页完全一致)
-  if (e.touches.length === 1) {
-    const curX = e.touches[0].clientX
-    const curY = e.touches[0].clientY
-    const deltaX = curX - touchStartX
-    const deltaY = curY - touchStartY
-
-    const now = Date.now()
-    const dt = now - lastTouchTime
-    if (dt > 8) {
-      velocity = (curX - lastTouchX) / dt
-      lastTouchX = curX
-      lastTouchTime = now
+  },
+  onZoomChange: (count) => {
+    // 双指缩放时同步高亮对应的快捷范围按钮
+    if (currentTab.value === 'day') {
+      if (count === 7) currentQuickRange.value = '7d'
+      else if (count === 14) currentQuickRange.value = '14d'
+      else if (count === 30) currentQuickRange.value = '30d'
+      else if (count === processedDayItems.value.length) currentQuickRange.value = 'all'
+      else currentQuickRange.value = ''
     }
+  },
+  onZoomLimit: (type, limit) => {
+    triggerZoomLimitAnimation(type, type === 'in' ? `已放大至最大视图 (${limit}项)` : `已缩小至全景视图 (${limit}项)`)
+  },
+  onEdgeLimit: (dir) => {
+    triggerEdgeLimitAnimation(dir, dir === 'left' ? '已至最早记录' : '已至最新记录')
+  },
+  hitRadiusMin: 22,
+  pinchLimitThreshold: 35,
+  edgeThreshold: 25
+})
 
-    if (isScrubbing) {
-      handleTapSelect(curX)
-      return
-    }
+const handleTouchStart = gestures.onTouchStart
+const handleTouchMove = gestures.onTouchMove
+const handleTouchEnd = gestures.onTouchEnd
+const handleTouchCancel = gestures.onTouchCancel
 
-    // 若位移超过 6px，取消长按选点计时
-    if (Math.hypot(deltaX, deltaY) > 6) {
-      if (longPressTimer) {
-        clearTimeout(longPressTimer)
-        longPressTimer = null
-      }
-
-      // 只要横向位移大于纵向位移，进入连续像素级拖拽
-      if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 6) {
-        isDragging = true
-
-        const minScrollX = getMinScrollX()
-        let targetScroll = touchStartScrollX + deltaX
-
-        if (targetScroll > 0) {
-          // 向右拉已超过最早记录：弹性阻尼
-          targetScroll = targetScroll * 0.28
-          if (deltaX > 25 && !edgeTriggered) {
-            edgeTriggered = true
-            triggerEdgeLimitAnimation('left', '已至最早记录')
-          }
-        } else if (targetScroll < minScrollX) {
-          // 向左拉已超过最新记录：弹性阻尼
-          const over = targetScroll - minScrollX
-          targetScroll = minScrollX + over * 0.28
-          if (deltaX < -25 && !edgeTriggered) {
-            edgeTriggered = true
-            triggerEdgeLimitAnimation('right', '已至最新记录')
-          }
-        } else {
-          edgeTriggered = false
-        }
-
-        scrollX = targetScroll
-        drawBothCharts()
-        updateVisibleMetrics()
-      }
-    }
-  }
-}
-
-const handleTouchEnd = (e: any) => {
-  lastChartTouchEndTime = Date.now()
-  if (longPressTimer) {
-    clearTimeout(longPressTimer)
-    longPressTimer = null
-  }
-
-  edgeTriggered = false
-
-  // 处理双指缩放释放流程 (单指抬起阶段与全部离开阶段)
-  if (isPinching || wasPinching) {
-    if (!e.touches || e.touches.length === 0) {
-      // 最后一根手指完全抬起，安全结束缩放会话，保持当前精确定位
-      isPinching = false
-      wasPinching = false
-      const minScrollX = getMinScrollX()
-      if (scrollX > 0 || scrollX < minScrollX) {
-        reboundToBoundary()
-      }
-    } else {
-      // 第一根手指先抬起，保持 wasPinching 锁定状态，等待最后一根手指离开，彻底杜绝单指滑动跳变
-      isPinching = false
-    }
-    return
-  }
-
-  if (isScrubbing) {
-    isScrubbing = false
-    return
-  }
-
-  if (isDragging) {
-    isDragging = false
-    const minScrollX = getMinScrollX()
-
-    // 1. 若超界，执行弹性回弹
-    if (scrollX > 0 || scrollX < minScrollX) {
-      reboundToBoundary()
-      return
-    }
-
-    // 2. 若存在滑动手速，触发惯性滑动
-    if (Math.abs(velocity) > 0.22) {
-      startInertia(velocity)
-    }
-    return
-  }
-
-  // 单次轻点直接选中数据点
-  handleTapSelect(touchStartX)
-}
-
-const handleTouchCancel = () => {
-  lastChartTouchEndTime = Date.now()
-  if (longPressTimer) {
-    clearTimeout(longPressTimer)
-    longPressTimer = null
-  }
-  edgeTriggered = false
-  isDragging = false
-  isScrubbing = false
-  isPinching = false
-  wasPinching = false
-  const minScrollX = getMinScrollX()
-  if (scrollX > 0 || scrollX < minScrollX) {
-    reboundToBoundary()
-  }
-}
+onUnmounted(() => {
+  gestures.dispose()
+})
 
 // 点击图表外空白处 -> 取消选中
 const handleBackgroundTap = () => {
   // 若刚在图表上有触控操作（400ms 保护期），阻断合成 tap 事件误关选中
-  if (Date.now() - lastChartTouchEndTime < 400) {
+  if (gestures.wasTouchedRecently(400)) {
     return
   }
   if (selectedPointIndex.value !== -1) {
@@ -1842,10 +1505,7 @@ watch(() => props.visible, (val) => {
     isAnimShow.value = false
     selectedPointIndex.value = -1
     isWeightExpanded.value = false
-    if (animTimer) {
-      clearTimeout(animTimer)
-      animTimer = null
-    }
+    gestures.dispose()
   }
 })
 

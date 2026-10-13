@@ -154,7 +154,7 @@ const refreshFeederState = () => {
 }
 
 const goToAutoFeeder = () => {
-  uni.navigateTo({ url: '/pages/tools/auto-feeder/index' })
+  uni.navigateTo({ url: '/packageTools/auto-feeder/index' })
 }
 
 const defaultFoodTags = ['巅峰牛肉', 'K9羊肉', '小李子', 'RAWZ兔肉', '冻干主食', '处方低碳粮']

@@ -1,5 +1,5 @@
 {
-	"pages": [ 
+	"pages": [
 		{
 			"path": "pages/index/index",
 			"style": {
@@ -43,41 +43,6 @@
 			}
 		},
 		{
-			"path": "pages/tools/converter/index",
-			"style": {
-				"navigationBarTitleText": "单位换算",
-				"navigationBarBackgroundColor": "#F7F9FC"
-			}
-		},
-		{
-			"path": "pages/tools/dry-matter/index",
-			"style": {
-				"navigationBarTitleText": "干物质计算",
-				"navigationBarBackgroundColor": "#F7F9FC"
-			}
-		},
-		{
-			"path": "pages/tools/alarm/index",
-			"style": {
-				"navigationBarTitleText": "设置提醒",
-				"navigationBarBackgroundColor": "#F7F9FC"
-			}
-		},
-		{
-			"path": "pages/tools/import/index",
-			"style": {
-				"navigationBarTitleText": "导入数据",
-				"navigationBarBackgroundColor": "#F7F9FC"
-			}
-		},
-		{
-			"path": "pages/tools/auto-feeder/index",
-			"style": {
-				"navigationBarTitleText": "自动喂食托管",
-				"navigationBarBackgroundColor": "#F7F9FC"
-			}
-		},
-		{
 			"path": "pages/history/index",
 			"style": {
 				"navigationBarTitleText": "历史数据",
@@ -98,29 +63,90 @@
 				"navigationBarTitleText": "我的",
 				"navigationBarBackgroundColor": "#F7F9FC"
 			}
-		},
-		{
-			"path": "pages/user/cat-profile/index",
-			"style": {
-				"navigationBarTitleText": "猫咪档案",
-				"navigationBarBackgroundColor": "#F7F9FC"
-			}
-		},
-		{
-			"path": "pages/user/family/index",
-			"style": {
-				"navigationBarTitleText": "家庭共享",
-				"navigationBarBackgroundColor": "#F7F9FC"
-			}
-		},
-		{
-			"path": "pages/user/about/index",
-			"style": {
-				"navigationBarTitleText": "关于与帮助",
-				"navigationBarBackgroundColor": "#F7F9FC"
-			}
 		}
 	],
+	"subPackages": [
+		{
+			"root": "packageTools",
+			"pages": [
+				{
+					"path": "converter/index",
+					"style": {
+						"navigationBarTitleText": "单位换算",
+						"navigationBarBackgroundColor": "#F7F9FC"
+					}
+				},
+				{
+					"path": "dry-matter/index",
+					"style": {
+						"navigationBarTitleText": "干物质计算",
+						"navigationBarBackgroundColor": "#F7F9FC"
+					}
+				},
+				{
+					"path": "alarm/index",
+					"style": {
+						"navigationBarTitleText": "设置提醒",
+						"navigationBarBackgroundColor": "#F7F9FC"
+					}
+				},
+				{
+					"path": "import/index",
+					"style": {
+						"navigationBarTitleText": "导入数据",
+						"navigationBarBackgroundColor": "#F7F9FC"
+					}
+				},
+				{
+					"path": "auto-feeder/index",
+					"style": {
+						"navigationBarTitleText": "自动喂食托管",
+						"navigationBarBackgroundColor": "#F7F9FC"
+					}
+				}
+			]
+		},
+		{
+			"root": "packageUser",
+			"pages": [
+				{
+					"path": "cat-profile/index",
+					"style": {
+						"navigationBarTitleText": "猫咪档案",
+						"navigationBarBackgroundColor": "#F7F9FC"
+					}
+				},
+				{
+					"path": "family/index",
+					"style": {
+						"navigationBarTitleText": "家庭共享",
+						"navigationBarBackgroundColor": "#F7F9FC"
+					}
+				},
+				{
+					"path": "about/index",
+					"style": {
+						"navigationBarTitleText": "关于与帮助",
+						"navigationBarBackgroundColor": "#F7F9FC"
+					}
+				}
+			]
+		}
+	],
+	"preloadRule": {
+		"pages/tools/index": {
+			"network": "all",
+			"packages": [
+				"packageTools"
+			]
+		},
+		"pages/user/index": {
+			"network": "all",
+			"packages": [
+				"packageUser"
+			]
+		}
+	},
 	"tabBar": {
 		"color": "#95A5A6",
 		"selectedColor": "#2ECC71",

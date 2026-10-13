@@ -3,6 +3,8 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 const _ = db.command
 
+const MP_STATE = ['developer', 'trial', 'formal'].includes(process.env.MP_STATE) ? process.env.MP_STATE : 'formal'
+
 exports.main = async (event, context) => {
   try {
     const now = Date.now()
@@ -23,8 +25,10 @@ exports.main = async (event, context) => {
     let failCount = 0
 
     for (let task of tasks) {
-      const d = new Date(task.trigger_time)
-      const timeStr = `${d.getFullYear()}年${String(d.getMonth()+1).padStart(2,'0')}月${String(d.getDate()).padStart(2,'0')}日 ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+      // 云函数运行环境为 UTC，需手动换算为北京时间 (UTC+8) 再格式化
+      const d = new Date(Number(task.trigger_time) + 8 * 3600 * 1000)
+      const pad = (n) => String(n).padStart(2, '0')
+      const timeStr = `${d.getUTCFullYear()}年${pad(d.getUTCMonth() + 1)}月${pad(d.getUTCDate())}日 ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`
 
       try {
         // 调用发送订阅消息 API
@@ -50,7 +54,9 @@ exports.main = async (event, context) => {
               value: task.reminder_type === '血糖检测' ? '该给猫咪测血糖啦！' : '该给猫咪打针啦！'
             }
           },
-          miniprogramState: 'developer' // developer为开发版；trial为体验版；formal为正式版
+          // developer 为开发版；trial 为体验版；formal 为正式版
+          // 默认正式版，调试时可在云函数环境变量中设置 MP_STATE=developer / trial
+          miniprogramState: MP_STATE
         })
 
         // 成功后标记状态

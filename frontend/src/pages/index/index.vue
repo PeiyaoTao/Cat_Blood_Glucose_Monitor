@@ -202,20 +202,37 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, getCurrentInstance } from 'vue'
+import { ref, computed, nextTick, getCurrentInstance, onUnmounted } from 'vue'
 import { onShow, onLoad, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
 import FullscreenAnalysisModal from '@/components/FullscreenAnalysisModal.vue'
-import { callApi } from '@/utils/api'
+import { callApi, consumeDataDirty, daysSinceLocalDate } from '@/utils/api'
+import { useChartGestures } from '@/composables/useChartGestures'
 import { checkAndSyncAutoFeeder } from '@/utils/feederSync'
 
 onLoad(async (options: any) => {
-  if (options && options.inviter) {
+  if (options && options.invite) {
     try {
-      await callApi('bindSharedCat', { inviter: options.inviter })
-      uni.showToast({ title: '已加入家庭共享', icon: 'success' })
-    } catch (e) {
+      const res = await callApi('acceptInvite', { token: options.invite })
+      if (!res.self) {
+        uni.showToast({ title: '已加入家庭共享', icon: 'success' })
+        loadAllData(true)
+      }
+    } catch (e: any) {
       console.log('绑定家庭共享失败', e)
+      const msg = String(e?.message || '')
+      uni.showModal({
+        title: '邀请无法使用',
+        content: msg.includes('EXPIRED') ? '该邀请已过期，请让家人重新发送邀请。' : '该邀请已失效，请让家人重新发送邀请。',
+        showCancel: false
+      })
     }
+  } else if (options && options.inviter) {
+    // 旧版邀请链接（裸 openid）已停用
+    uni.showModal({
+      title: '邀请已失效',
+      content: '为保护猫咪健康数据安全，旧版邀请链接已停用，请让家人在「我的 - 家庭成员」中重新发送邀请。',
+      showCancel: false
+    })
   }
 })
 
@@ -274,7 +291,6 @@ const recentRecords = ref<any[]>([])
 const recentInsulins = ref<any[]>([])
 const rawGlucoseData = ref<any[]>([])
 const rawWeightData = ref<any[]>([])
-let lastChartTouchEndTime = 0
 
 // Canvas 2D 实体引用与布局尺寸
 const instance = getCurrentInstance()
@@ -288,24 +304,7 @@ let canvasBoxLeft = 0
 const currentZoomCount = ref(5)
 const selectedPointIndex = ref(-1)
 let scrollX = 0
-let animTimer: any = null
 
-let touchStartX = 0
-let touchStartY = 0
-let touchStartScrollX = 0
-let lastTouchX = 0
-let lastTouchTime = 0
-let velocity = 0
-let isDragging = false
-let isScrubbing = false
-let isPinching = false
-let wasPinching = false
-let startPinchDist = 0
-let startZoomCount = 5
-let startPinchCenterPlotX = 0
-let startPinchItemIdx = 0
-let longPressTimer: any = null
-let edgeTriggered = false
 
 // 缩放/边界触底动画与轻量 Toast
 const zoomLimitClass = ref('')
@@ -498,10 +497,7 @@ const updateTrackRect = () => {
 
 const onSliderTouchStart = async (e: any) => {
   isDraggingSlider.value = true
-  if (animTimer) {
-    clearTimeout(animTimer)
-    animTimer = null
-  }
+  gestures.stopAnimation()
   if (!trackRect) {
     await updateTrackRect()
   } else {
@@ -546,7 +542,7 @@ const handleSliderTouch = (e: any) => {
 // 点击图表外空白处 -> 取消数据点选中状态
 const handleBackgroundTap = () => {
   // 若刚在图表上有触控或选点操作（400ms 保护期），坚决阻断合成 tap 事件导致的误取消
-  if (Date.now() - lastChartTouchEndTime < 400) {
+  if (gestures.wasTouchedRecently(400)) {
     return
   }
   if (selectedPointIndex.value !== -1) {
@@ -572,341 +568,38 @@ const getBoxLeft = () => {
   }
 }
 
-const handleTapSelect = (clientX: number) => {
-  const items = currentChartItems.value
-  if (!items.length) return
-  const boxLeft = getBoxLeft()
-  const { padLeft, spacing } = getPlotMetrics()
-  const clickX = clientX - boxLeft
+// 图表手势引擎（与全屏分析弹窗共用，见 composables/useChartGestures.ts）
+const gestures = useChartGestures({
+  zoomCount: currentZoomCount,
+  selectedIndex: selectedPointIndex,
+  getScrollX: () => scrollX,
+  setScrollX: (x: number) => { scrollX = x },
+  getItemCount: () => currentChartItems.value.length,
+  getPlotMetrics,
+  getMinScrollX,
+  getBoxLeft,
+  getZoomLimits: () => ({ min: 3, max: Math.max(15, Math.max(3, currentChartItems.value.length)) }),
+  redraw: () => drawMainChart(),
+  onZoomLimit: (type, limit) => {
+    triggerZoomLimitAnimation(type, type === 'in' ? `已放大至最大视图 (${limit}项)` : `已缩小至全景视图 (${limit}项)`)
+  },
+  onEdgeLimit: (dir) => {
+    triggerEdgeLimitAnimation(dir, dir === 'left' ? '已至最早记录' : '已至最新记录')
+  },
+  hitRadiusMin: 24,
+  pinchLimitThreshold: 30,
+  edgeThreshold: 20
+})
 
-  let closestIdx = -1
-  let minDiff = 99999
-  items.forEach((_, i) => {
-    const x = padLeft + i * spacing + scrollX
-    const diff = Math.abs(x - clickX)
-    if (diff < minDiff) {
-      minDiff = diff
-      closestIdx = i
-    }
-  })
+const handleChartTouchStart = gestures.onTouchStart
+const handleChartTouchMove = gestures.onTouchMove
+const handleChartTouchEnd = gestures.onTouchEnd
+const handleChartTouchCancel = gestures.onTouchCancel
 
-  const hitRadius = Math.max(24, spacing / 2)
-  if (closestIdx !== -1 && minDiff <= hitRadius) {
-    selectedPointIndex.value = closestIdx
-    drawMainChart()
-  } else {
-    if (selectedPointIndex.value !== -1) {
-      selectedPointIndex.value = -1
-      drawMainChart()
-    }
-  }
-}
-
-const reboundToBoundary = () => {
-  if (animTimer) {
-    clearTimeout(animTimer)
-    animTimer = null
-  }
-  const minScroll = getMinScrollX()
-  const target = scrollX > 0 ? 0 : minScroll
-  const start = scrollX
-  const startTime = Date.now()
-  const duration = 240
-
-  const stepAnim = () => {
-    const elapsed = Date.now() - startTime
-    const progress = Math.min(1, elapsed / duration)
-    const ease = 1 - Math.pow(1 - progress, 3)
-    scrollX = start + (target - start) * ease
-    drawMainChart()
-
-    if (progress < 1) {
-      animTimer = setTimeout(stepAnim, 16)
-    } else {
-      scrollX = target
-      drawMainChart()
-      animTimer = null
-    }
-  }
-  stepAnim()
-}
-
-const startInertia = (initVelocity: number) => {
-  if (animTimer) {
-    clearTimeout(animTimer)
-    animTimer = null
-  }
-  let v = initVelocity * 14
-  if (v > 25) v = 25
-  if (v < -25) v = -25
-
-  const friction = 0.92
-
-  const stepFlick = () => {
-    if (Math.abs(v) < 0.4) {
-      animTimer = null
-      const minScroll = getMinScrollX()
-      if (scrollX > 0 || scrollX < minScroll) {
-        reboundToBoundary()
-      }
-      return
-    }
-
-    v *= friction
-    scrollX += v
-    const minScroll = getMinScrollX()
-
-    if (scrollX > 0) {
-      scrollX *= 0.6
-      v *= 0.5
-    } else if (scrollX < minScroll) {
-      const over = scrollX - minScroll
-      scrollX = minScroll + over * 0.6
-      v *= 0.5
-    }
-
-    drawMainChart()
-
-    if (scrollX > 20 || scrollX < minScroll - 20) {
-      animTimer = null
-      reboundToBoundary()
-      return
-    }
-
-    animTimer = setTimeout(stepFlick, 16)
-  }
-  stepFlick()
-}
-
-const handleChartTouchStart = (e: any) => {
-  if (!e.touches) return
-  edgeTriggered = false
-  if (animTimer) {
-    clearTimeout(animTimer)
-    animTimer = null
-  }
-
-  // 双指缩放
-  if (e.touches.length === 2) {
-    if (longPressTimer) {
-      clearTimeout(longPressTimer)
-      longPressTimer = null
-    }
-    isScrubbing = false
-    isDragging = false
-    isPinching = true
-    wasPinching = true
-    const p1 = e.touches[0]
-    const p2 = e.touches[1]
-    startPinchDist = Math.hypot(p1.clientX - p2.clientX, p1.clientY - p2.clientY)
-    startZoomCount = currentZoomCount.value
-
-    const boxLeft = getBoxLeft()
-    const { padLeft, plotWidth, spacing } = getPlotMetrics()
-    const pinchScreenX = (p1.clientX + p2.clientX) / 2
-    startPinchCenterPlotX = Math.max(0, Math.min(plotWidth, pinchScreenX - boxLeft - padLeft))
-    startPinchItemIdx = (-scrollX + startPinchCenterPlotX) / (spacing || 1)
-    edgeTriggered = false
-    return
-  }
-
-  // 单指交互
-  if (e.touches.length === 1) {
-    // 若当前手势包含缩放，在所有手指彻底离开前，绝对不初始化单指参数
-    if (isPinching || wasPinching) {
-      return
-    }
-    touchStartX = e.touches[0].clientX
-    touchStartY = e.touches[0].clientY
-    touchStartScrollX = scrollX
-    lastTouchX = touchStartX
-    lastTouchTime = Date.now()
-    velocity = 0
-    isDragging = false
-    isScrubbing = false
-    isPinching = false
-    wasPinching = false
-
-    if (longPressTimer) {
-      clearTimeout(longPressTimer)
-      longPressTimer = null
-    }
-
-    // 长按 220ms 触发滑动选点模式
-    longPressTimer = setTimeout(() => {
-      longPressTimer = null
-      isScrubbing = true
-      handleTapSelect(touchStartX)
-    }, 220)
-  }
-}
-
-const handleChartTouchMove = (e: any) => {
-  if (!e.touches) return
-
-  // 双指手势缩放 (以双指中心点为几何锚点，保持当前缩放数据点位置不动)
-  if (e.touches.length === 2 && isPinching) {
-    const p1 = e.touches[0]
-    const p2 = e.touches[1]
-    const curDist = Math.hypot(p1.clientX - p2.clientX, p1.clientY - p2.clientY)
-    const diff = curDist - startPinchDist
-    const total = Math.max(3, currentChartItems.value.length)
-    const minZoom = 3
-    const maxZoom = Math.max(15, total)
-
-    const deltaUnits = Math.round(-diff / 22)
-    let targetCount = startZoomCount + deltaUnits
-    targetCount = Math.max(minZoom, Math.min(maxZoom, targetCount))
-
-    if (curDist - startPinchDist > 30 && currentZoomCount.value === minZoom && !edgeTriggered) {
-      edgeTriggered = true
-      triggerZoomLimitAnimation('in', `已放大至最大视图 (${minZoom}项)`)
-    } else if (curDist - startPinchDist < -30 && currentZoomCount.value === maxZoom && !edgeTriggered) {
-      edgeTriggered = true
-      triggerZoomLimitAnimation('out', `已缩小至全景视图 (${maxZoom}项)`)
-    } else if (targetCount > minZoom && targetCount < maxZoom) {
-      edgeTriggered = false
-    }
-
-    const boxLeft = getBoxLeft()
-    const { padLeft, plotWidth } = getPlotMetrics()
-    const pinchScreenX = (p1.clientX + p2.clientX) / 2
-    const curPinchCenterPlotX = Math.max(0, Math.min(plotWidth, pinchScreenX - boxLeft - padLeft))
-
-    currentZoomCount.value = targetCount
-    const newSpacing = plotWidth / (targetCount - 1 || 1)
-    let newScrollX = curPinchCenterPlotX - startPinchItemIdx * newSpacing
-
-    const minScroll = getMinScrollX()
-    scrollX = Math.max(minScroll, Math.min(0, newScrollX))
-
-    drawMainChart()
-    return
-  }
-
-  // 严格防护：若当前手势包含双指缩放，在所有手指完全离开屏幕前，绝对禁止退化为单指拖拽或平移
-  if (isPinching || wasPinching) {
-    return
-  }
-
-  // 单指移动
-  if (e.touches.length === 1) {
-    const curX = e.touches[0].clientX
-    const curY = e.touches[0].clientY
-    const deltaX = curX - touchStartX
-    const deltaY = curY - touchStartY
-
-    const now = Date.now()
-    const dt = now - lastTouchTime
-    if (dt > 8) {
-      velocity = (curX - lastTouchX) / dt
-      lastTouchX = curX
-      lastTouchTime = now
-    }
-
-    if (isScrubbing) {
-      handleTapSelect(curX)
-      return
-    }
-
-    if (Math.hypot(deltaX, deltaY) > 6) {
-      if (longPressTimer) {
-        clearTimeout(longPressTimer)
-        longPressTimer = null
-      }
-
-      if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 6) {
-        isDragging = true
-        const minScroll = getMinScrollX()
-        let targetScroll = touchStartScrollX + deltaX
-
-        if (targetScroll > 0) {
-          targetScroll = targetScroll * 0.28
-          if (deltaX > 20 && !edgeTriggered) {
-            edgeTriggered = true
-            triggerEdgeLimitAnimation('left', '已至最早记录')
-          }
-        } else if (targetScroll < minScroll) {
-          const over = targetScroll - minScroll
-          targetScroll = minScroll + over * 0.28
-          if (deltaX < -20 && !edgeTriggered) {
-            edgeTriggered = true
-            triggerEdgeLimitAnimation('right', '已至最新记录')
-          }
-        } else {
-          edgeTriggered = false
-        }
-
-        scrollX = targetScroll
-        drawMainChart()
-      }
-    }
-  }
-}
-
-const handleChartTouchEnd = (e: any) => {
-  lastChartTouchEndTime = Date.now()
-  if (longPressTimer) {
-    clearTimeout(longPressTimer)
-    longPressTimer = null
-  }
-
-  edgeTriggered = false
-
-  // 处理双指缩放释放流程 (单指抬起阶段与全部离开阶段)
-  if (isPinching || wasPinching) {
-    if (!e.touches || e.touches.length === 0) {
-      // 最后一根手指完全抬起，安全结束缩放会话，保持当前精确定位
-      isPinching = false
-      wasPinching = false
-      const minScroll = getMinScrollX()
-      if (scrollX > 0 || scrollX < minScroll) {
-        reboundToBoundary()
-      }
-    } else {
-      // 第一根手指先抬起，保持 wasPinching 锁定状态，等待最后一根手指离开，彻底杜绝单指滑动跳变
-      isPinching = false
-    }
-    return
-  }
-
-  if (isScrubbing) {
-    isScrubbing = false
-    return
-  }
-
-  if (isDragging) {
-    isDragging = false
-    const minScroll = getMinScrollX()
-    if (scrollX > 0 || scrollX < minScroll) {
-      reboundToBoundary()
-      return
-    }
-    if (Math.abs(velocity) > 0.22) {
-      startInertia(velocity)
-    }
-    return
-  }
-
-  handleTapSelect(touchStartX)
-}
-
-const handleChartTouchCancel = () => {
-  lastChartTouchEndTime = Date.now()
-  if (longPressTimer) {
-    clearTimeout(longPressTimer)
-    longPressTimer = null
-  }
-  edgeTriggered = false
-  isDragging = false
-  isScrubbing = false
-  isPinching = false
-  wasPinching = false
-  const minScroll = getMinScrollX()
-  if (scrollX > 0 || scrollX < minScroll) {
-    reboundToBoundary()
-  }
-}
+onUnmounted(() => {
+  gestures.dispose()
+  if (toastTimer) clearTimeout(toastTimer)
+})
 
 // Canvas 2D 初始化
 const initMainCanvas = (callback?: () => void) => {
@@ -965,11 +658,7 @@ const fetchCatProfile = async () => {
       }
       
       if (cat.diagnosis_date) {
-        const dDate = new Date(cat.diagnosis_date)
-        const today = new Date()
-        const diffTime = Math.abs(today.getTime() - dDate.getTime())
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-        catInfo.value.daysSinceDiagnosis = diffDays
+        catInfo.value.daysSinceDiagnosis = daysSinceLocalDate(cat.diagnosis_date)
       } else {
         catInfo.value.daysSinceDiagnosis = 0
       }
@@ -1531,10 +1220,24 @@ const formatDisplayTime = (date: Date) => {
   }
 }
 
-const loadAllData = async () => {
+// 首页数据缓存策略：仅在数据变更 / 切换猫咪 / 超过 5 分钟时才重新拉取，避免每次返回首页都发起 5+ 次云函数调用
+const DATA_STALE_MS = 5 * 60 * 1000
+let lastLoadedAt = 0
+let lastLoadedCatId = ''
+
+const loadAllData = async (force: boolean = false) => {
+  const dirty = consumeDataDirty()
+  const storedCatId = uni.getStorageSync('currentCatId') || ''
+  const isFresh = Date.now() - lastLoadedAt < DATA_STALE_MS
+  if (!force && !dirty && isFresh && storedCatId === lastLoadedCatId) {
+    return
+  }
+  lastLoadedAt = Date.now()
+
   await fetchCatProfile()
-  if (catInfo.value._id || allCats.value.length === 0) {
-    // 异步后台静默执行自动喂食机对齐补录，不阻塞核心健康数据拉取
+  lastLoadedCatId = catInfo.value._id
+  if (catInfo.value._id) {
+    // 异步后台静默执行自动喂食机对齐补录（云端幂等），不阻塞核心健康数据拉取
     checkAndSyncAutoFeeder(catInfo.value._id).catch(() => {})
     fetchRecentRecords()
     fetchRecentInsulins()
@@ -1561,7 +1264,7 @@ const handleSwitchCat = () => {
     itemList,
     success: (res) => {
       if (res.tapIndex === itemList.length - 1) {
-        uni.navigateTo({ url: '/pages/user/cat-profile/index' })
+        uni.navigateTo({ url: '/packageUser/cat-profile/index' })
       } else {
         const selectedCat = allCats.value[res.tapIndex]
         uni.setStorageSync('currentCatId', selectedCat._id)

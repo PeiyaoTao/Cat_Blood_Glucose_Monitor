@@ -227,10 +227,10 @@ const handleMenuClick = async (menuName: string) => {
         itemList,
         success: (actionRes) => {
           if (actionRes.tapIndex === itemList.length - 1) {
-            uni.navigateTo({ url: '/pages/user/cat-profile/index' })
+            uni.navigateTo({ url: '/packageUser/cat-profile/index' })
           } else {
             const selectedCat = res.data[actionRes.tapIndex]
-            uni.navigateTo({ url: `/pages/user/cat-profile/index?id=${selectedCat._id}` })
+            uni.navigateTo({ url: `/packageUser/cat-profile/index?id=${selectedCat._id}` })
           }
         }
       })
@@ -241,9 +241,9 @@ const handleMenuClick = async (menuName: string) => {
   } else if (menuName === '历史数据') {
     uni.navigateTo({ url: '/pages/history/index' })
   } else if (menuName === '家庭共享') {
-    uni.navigateTo({ url: '/pages/user/family/index' })
+    uni.navigateTo({ url: '/packageUser/family/index' })
   } else if (menuName === '使用帮助' || menuName === '关于我们') {
-    uni.navigateTo({ url: '/pages/user/about/index' })
+    uni.navigateTo({ url: '/packageUser/about/index' })
   } else {
     uni.showToast({ title: `${menuName} 功能开发中`, icon: 'none' })
   }

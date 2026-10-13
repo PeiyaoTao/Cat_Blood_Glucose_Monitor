@@ -68,18 +68,21 @@ exports.main = async (event, context) => {
   }
 
   try {
-    // 0. 获取猫咪信息以显示专属表头
-    let catName = '猫咪'
-    try {
-      if (catId && catId !== 'default') {
-        const catRes = await db.collection('cats').doc(catId).get()
-        if (catRes.data && catRes.data.name) {
-          catName = catRes.data.name
-        }
-      }
-    } catch (e) {
-      console.log('Cat fetch fallback:', e.message)
+    // 0. 权限校验 + 获取猫咪信息以显示专属表头
+    if (!catId || catId === 'default') {
+      return { code: -1, msg: '请先创建猫咪档案' }
     }
+    let catDoc = null
+    try {
+      const catRes = await db.collection('cats').doc(catId).get()
+      catDoc = catRes.data
+    } catch (e) {
+      return { code: -1, msg: '猫咪档案不存在' }
+    }
+    if (!catDoc || (catDoc._openid !== openid && !(catDoc.shared_with || []).includes(openid))) {
+      return { code: -1, msg: '无权导出该猫咪的数据' }
+    }
+    const catName = catDoc.name || '猫咪'
 
     const MAX_LIMIT = 100
     
@@ -518,7 +521,7 @@ exports.main = async (event, context) => {
 
     // 9. 上传到微信云存储
     const uploadRes = await cloud.uploadFile({
-      cloudPath: `reports/${Date.now()}_report.xlsx`,
+      cloudPath: `reports/${openid}/${Date.now()}_report.xlsx`,
       fileContent: buffer
     })
 

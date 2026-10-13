@@ -59,14 +59,13 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
-import { getFeederConfig, isFeederConfigValid } from '@/utils/feederSync'
+import { getFeederConfig, fetchFeederConfigFromCloud, isFeederConfigValid, type AutoFeederConfig } from '@/utils/feederSync'
+import { callApi } from '@/utils/api'
 
 const feederStatusDesc = ref('适配喂食机定时出餐')
 const isFeederRunning = ref(false)
 
-const refreshFeederStatus = () => {
-  const catId = uni.getStorageSync('currentCatId') || 'default'
-  const cfg = getFeederConfig(catId)
+const applyFeederStatus = (cfg: AutoFeederConfig) => {
   if (cfg.is_active && isFeederConfigValid(cfg)) {
     isFeederRunning.value = true
     feederStatusDesc.value = `● 运行中 (${cfg.schedule.length}餐/天)`
@@ -79,6 +78,15 @@ const refreshFeederStatus = () => {
   }
 }
 
+const refreshFeederStatus = async () => {
+  const catId = uni.getStorageSync('currentCatId') || 'default'
+  // 先用本地缓存快速展示，再以云端配置为准刷新（家人可能在其他设备上修改了托管设置）
+  applyFeederStatus(getFeederConfig(catId))
+  if (catId !== 'default') {
+    applyFeederStatus(await fetchFeederConfigFromCloud(catId))
+  }
+}
+
 onShow(() => {
   refreshFeederStatus()
 })
@@ -87,24 +95,24 @@ const handleToolClick = (toolName: string) => {
   switch (toolName) {
     case '自动喂食托管':
     case '自动喂食':
-      uni.navigateTo({ url: '/pages/tools/auto-feeder/index' })
+      uni.navigateTo({ url: '/packageTools/auto-feeder/index' })
       break
     case '单位换算':
     case '单位换算器':
-      uni.navigateTo({ url: '/pages/tools/converter/index' })
+      uni.navigateTo({ url: '/packageTools/converter/index' })
       break
     case '干物质计算':
     case '干物质计算器':
-      uni.navigateTo({ url: '/pages/tools/dry-matter/index' })
+      uni.navigateTo({ url: '/packageTools/dry-matter/index' })
       break
     case '导入数据':
     case '导入历史数据':
-      uni.navigateTo({ url: '/pages/tools/import/index' })
+      uni.navigateTo({ url: '/packageTools/import/index' })
       break
     case '设置提醒':
     case '打针提醒':
     case '医疗提醒':
-      uni.navigateTo({ url: '/pages/tools/alarm/index' })
+      uni.navigateTo({ url: '/packageTools/alarm/index' })
       break
     case '导出报告':
       uni.showActionSheet({
@@ -138,6 +146,8 @@ const exportExcel = async (days: number) => {
         fileID: res.result.fileID,
         success: (downloadRes: any) => {
           uni.hideLoading()
+          // 已下载到本地，清理云端临时报告文件，避免云存储无限增长
+          callApi('deleteReportFile', { fileID: res.result.fileID }).catch(() => {})
           const customFileName = res.result.fileName || '血糖报告.xlsx'
           // @ts-ignore
           const fs = wx.getFileSystemManager()
@@ -186,7 +196,7 @@ const exportExcel = async (days: number) => {
       })
     } else {
       uni.hideLoading()
-      uni.showToast({ title: '生成失败，请检查云函数部署', icon: 'none' })
+      uni.showToast({ title: res.result?.msg || '生成失败，请检查云函数部署', icon: 'none' })
       console.error(res.result)
     }
   } catch (err) {

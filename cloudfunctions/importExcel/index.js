@@ -18,11 +18,15 @@ const getCellText = (cell) => {
       return cell.value.richText.map(rt => rt.text || '').join('').trim()
     }
     if (cell.value instanceof Date) {
-      // ExcelJS 将日期单元格转为了 Date 对象
+      // ExcelJS 将日期单元格转为了以 UTC 表示的 Date 对象，需用 UTC 方法读取
       const d = cell.value
-      const y = d.getFullYear()
-      const m = String(d.getMonth() + 1).padStart(2, '0')
-      const date = String(d.getDate()).padStart(2, '0')
+      // 纯时间单元格（如 07:30）会被解析为 1899-12-30T07:30Z，此时返回 HH:mm
+      if (d.getUTCFullYear() < 1901) {
+        return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
+      }
+      const y = d.getUTCFullYear()
+      const m = String(d.getUTCMonth() + 1).padStart(2, '0')
+      const date = String(d.getUTCDate()).padStart(2, '0')
       return `${y}-${m}-${date}`
     }
   }
@@ -115,7 +119,9 @@ const parseNumberWithUnit = (raw) => {
   return null
 }
 
-// 5. 根据日期和时分构造本地时间戳 (UTC+8)
+// 5. 根据日期和时分构造北京时间 (UTC+8) 时间戳
+// 注意：云函数运行环境时区为 UTC，不能直接使用 new Date(y, m, d, h, min)
+const CST_OFFSET_MS = 8 * 3600 * 1000
 const makeTimestamp = (dateStr, timeStr) => {
   if (!dateStr) return Date.now()
   const parts = dateStr.split('-').map(Number)
@@ -129,8 +135,66 @@ const makeTimestamp = (dateStr, timeStr) => {
     h = tParts[0] || 0
     min = tParts[1] || 0
   }
-  return new Date(y, m, d, h, min, 0).getTime()
+  return Date.UTC(y, m, d, h, min, 0) - CST_OFFSET_MS
 }
+
+// 将时间戳转换为北京时间的 { date: 'YYYY-MM-DD', time: 'HH:mm' }
+const toCST = (ts) => {
+  const d = new Date(Number(ts) + CST_OFFSET_MS)
+  const pad = (n) => String(n).padStart(2, '0')
+  return {
+    date: `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`,
+    time: `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`
+  }
+}
+
+// 6. 导入数据字段白名单（parsedData 由前端回传，必须重新清洗）
+const IMPORT_FIELDS = {
+  blood_glucose: ['bg_value', 'period', 'status', 'record_date', 'measure_time', 'note', 'createTime'],
+  insulin_records: ['dose', 'period', 'dose_adjustment', 'insulin_type', 'record_date', 'inject_time', 'note', 'createTime'],
+  meal_records: ['food_grams', 'period', 'food_brand', 'extras', 'record_date', 'meal_time', 'note', 'createTime'],
+  excretion_records: ['urine', 'stool_status', 'stool_color', 'record_date', 'record_time', 'note', 'createTime'],
+  weight_records: ['weight_value', 'record_date', 'measure_time', 'note', 'createTime']
+}
+const MAX_IMPORT_PER_TYPE = 5000
+
+const sanitizeImportItems = (items, collectionName, catId, openid) => {
+  if (!Array.isArray(items)) return []
+  const fields = IMPORT_FIELDS[collectionName]
+  return items.slice(0, MAX_IMPORT_PER_TYPE)
+    .filter(item => item && typeof item === 'object' && /^\d{4}-\d{2}-\d{2}$/.test(String(item.record_date || '')))
+    .map(item => {
+      const doc = {}
+      fields.forEach(k => {
+        if (item[k] !== undefined) doc[k] = item[k]
+      })
+      if (typeof doc.createTime !== 'number' || isNaN(doc.createTime)) {
+        doc.createTime = makeTimestamp(doc.record_date, doc.measure_time || doc.inject_time || doc.meal_time || doc.record_time)
+      }
+      if (doc.note !== undefined) doc.note = String(doc.note).slice(0, 500)
+      doc.cat_id = catId
+      doc.created_by = openid
+      doc.source = 'excel_import'
+      return doc
+    })
+}
+
+// 7. 校验当前用户是否有权访问该猫咪
+const checkCatAccess = async (catId, openid) => {
+  if (!catId || catId === 'default') throw new Error('请先在「我的」中创建猫咪档案')
+  let cat = null
+  try {
+    const res = await db.collection('cats').doc(catId).get()
+    cat = res.data
+  } catch (e) {
+    throw new Error('猫咪档案不存在')
+  }
+  if (!cat || (cat._openid !== openid && !(cat.shared_with || []).includes(openid))) {
+    throw new Error('无权访问该猫咪档案')
+  }
+  return cat
+}
+
 
 // ==================== 模糊表头匹配字典 ====================
 const HEADER_KEYWORD_MAP = {
@@ -189,6 +253,9 @@ exports.main = async (event, context) => {
   const { action, fileID, catId = 'default', parsedData, skipDuplicates = true } = event
 
   try {
+    // 权限校验：只能向自己创建或被共享的猫咪导入数据
+    await checkCatAccess(catId, openid)
+
     // -------------------------------------------------------------
     // ACTION 1: 解析文件 (PARSE)
     // -------------------------------------------------------------
@@ -444,7 +511,12 @@ exports.main = async (event, context) => {
         return { code: -1, msg: '缺少待导入的数据集' }
       }
 
-      const { glucoses = [], insulins = [], meals = [], excretions = [], weights = [] } = parsedData
+      // parsedData 由前端回传，必须重新清洗：强制 cat_id、字段白名单、数量上限
+      const glucoses = sanitizeImportItems(parsedData.glucoses, 'blood_glucose', catId, openid)
+      const insulins = sanitizeImportItems(parsedData.insulins, 'insulin_records', catId, openid)
+      const meals = sanitizeImportItems(parsedData.meals, 'meal_records', catId, openid)
+      const excretions = sanitizeImportItems(parsedData.excretions, 'excretion_records', catId, openid)
+      const weights = sanitizeImportItems(parsedData.weights, 'weight_records', catId, openid)
 
       let importedCounts = {
         glucose: 0,
@@ -455,6 +527,27 @@ exports.main = async (event, context) => {
       }
       let skippedCount = 0
 
+      // 辅助函数：分页拉取导入日期区间内的全部已有记录（不再受 1000 条上限影响）
+      const fetchExistingInRange = async (collectionName, minDate, maxDate) => {
+        const PAGE = 1000
+        const rangeStart = makeTimestamp(minDate, '00:00')
+        const rangeEnd = makeTimestamp(maxDate, '23:59') + 60 * 1000
+        const query = db.collection(collectionName).where(_.and([
+          { cat_id: catId },
+          _.or([
+            { record_date: _.gte(minDate).and(_.lte(maxDate)) },
+            { createTime: _.gte(rangeStart).and(_.lt(rangeEnd)) }
+          ])
+        ]))
+        const all = []
+        for (let skip = 0; skip < 50000; skip += PAGE) {
+          const res = await query.skip(skip).limit(PAGE).get()
+          all.push(...(res.data || []))
+          if (!res.data || res.data.length < PAGE) break
+        }
+        return all
+      }
+
       // 辅助函数：批量安全写入（分批并发，每批 20 条）
       const batchInsert = async (collectionName, items, typeKey, dedupeKeyGen) => {
         if (!items || items.length === 0) return
@@ -463,15 +556,11 @@ exports.main = async (event, context) => {
         let existingSet = new Set()
         if (skipDuplicates) {
           try {
-            const existingRes = await db.collection(collectionName)
-              .where({ cat_id: catId })
-              .limit(1000)
-              .get()
-            if (existingRes.data) {
-              existingRes.data.forEach(rec => {
-                existingSet.add(dedupeKeyGen(rec))
-              })
-            }
+            const dates = items.map(it => it.record_date).sort()
+            const existing = await fetchExistingInRange(collectionName, dates[0], dates[dates.length - 1])
+            existing.forEach(rec => {
+              existingSet.add(dedupeKeyGen(rec))
+            })
           } catch (e) {
             console.log(`Fetch existing ${collectionName} warning:`, e.message)
           }
@@ -496,28 +585,17 @@ exports.main = async (event, context) => {
         }
       }
 
-      // 辅助函数：提取标准规范化的查重键
+      // 辅助函数：提取标准规范化的查重键（统一按北京时间换算）
       const getDedupeDate = (doc) => {
         if (doc.record_date) return cleanDateStr(doc.record_date)
-        if (doc.createTime) {
-          const d = new Date(doc.createTime)
-          const y = d.getFullYear()
-          const m = String(d.getMonth() + 1).padStart(2, '0')
-          const date = String(d.getDate()).padStart(2, '0')
-          return `${y}-${m}-${date}`
-        }
+        if (doc.createTime) return toCST(doc.createTime).date
         return ''
       }
 
       const getDedupeTime = (doc) => {
         const raw = doc.measure_time || doc.inject_time || doc.meal_time || doc.record_time || ''
         if (raw) return cleanTimeStr(raw)
-        if (doc.createTime) {
-          const d = new Date(doc.createTime)
-          const h = String(d.getHours()).padStart(2, '0')
-          const min = String(d.getMinutes()).padStart(2, '0')
-          return `${h}:${min}`
-        }
+        if (doc.createTime) return toCST(doc.createTime).time
         return ''
       }
 
