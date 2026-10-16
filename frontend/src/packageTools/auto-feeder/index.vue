@@ -187,19 +187,21 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { callApi, getLocalTodayDate } from '@/utils/api'
+import { getLocalTodayDate } from '@/utils/api'
 import { 
   getFeederConfig, 
   fetchFeederConfigFromCloud,
   saveFeederConfig, 
-  isFeederConfigValid, 
   checkAndSyncAutoFeeder,
   type AutoFeederMealItem,
   type AutoFeederConfig
 } from '@/utils/feederSync'
+import { useCatSession } from '@/composables/useCatSession'
+import { useCustomPresets } from '@/composables/useCustomPresets'
 
-const currentCatId = ref('default')
-const currentCatName = ref('当前猫咪')
+const { currentCatId, currentCat, fetchCats } = useCatSession()
+const currentCatName = computed(() => currentCat.value?.name || '当前猫咪')
+
 const isActive = ref(false)
 const scheduleList = ref<AutoFeederMealItem[]>([])
 const defaultBrand = ref('')
@@ -207,40 +209,52 @@ const defaultExtras = ref('')
 const defaultNote = ref('自动喂食机定时出餐')
 
 const defaultFoodTags = ['小李子禽', '巅峰牛肉', 'K9羊肉', 'RAWZ兔肉', '冻干主食', '处方低碳粮']
-const customFoodList = ref<string[]>([])
+const {
+  allOptions: allFoodTags,
+  isCustom: isCustomFood,
+  addCustom: addCustomFood,
+  confirmRemoveCustom: confirmRemoveFood
+} = useCustomPresets({
+  storageKey: 'custom_food_brands',
+  defaultItems: defaultFoodTags,
+  insertPosition: 'prepend',
+  deleteModalTitle: '删除常用罐头',
+  savedToastText: '已保存常用罐头',
+  deletedToastText: '已删除常用罐头'
+})
+
 const defaultExtraTags = ['益生菌', '鱼油', '皮下补水', '辅酶Q10', '维生素B']
-const customExtraList = ref<string[]>([])
+const {
+  allOptions: allExtraTags,
+  isCustom: isCustomExtra,
+  addCustom: addCustomExtra,
+  confirmRemoveCustom: confirmRemoveExtra
+} = useCustomPresets({
+  storageKey: 'custom_extras',
+  defaultItems: defaultExtraTags,
+  insertPosition: 'prepend',
+  deleteModalTitle: '删除常用补剂',
+  savedToastText: '已保存常用补剂',
+  deletedToastText: '已删除常用补剂'
+})
 
 onMounted(async () => {
-  loadPresets()
   loadConfig()
 
   try {
-    const res = await callApi('getCats')
-    if (res.data && res.data.length > 0) {
-      const storedId = uni.getStorageSync('currentCatId')
-      const targetCat = res.data.find((c: any) => c._id === storedId) || res.data[0]
-      currentCatId.value = targetCat._id
-      currentCatName.value = targetCat.name || '猫咪'
-
-      // 从云端同步拉取最新配置（若本地清缓存可毫秒级恢复）
-      await fetchFeederConfigFromCloud(currentCatId.value)
-      loadConfig()
-    }
+    await fetchCats()
+    const catId = currentCatId.value || 'default'
+    // 从云端同步拉取最新配置（若本地清缓存可毫秒级恢复）
+    await fetchFeederConfigFromCloud(catId)
+    loadConfig()
   } catch (e) {
     console.log('fetch cat in auto-feeder warning', e)
   }
 })
 
-const loadPresets = () => {
-  const savedFoods = uni.getStorageSync('custom_food_brands')
-  if (savedFoods && Array.isArray(savedFoods)) customFoodList.value = savedFoods
-  const savedExtras = uni.getStorageSync('custom_extras')
-  if (savedExtras && Array.isArray(savedExtras)) customExtraList.value = savedExtras
-}
-
 const loadConfig = () => {
-  const cfg = getFeederConfig(currentCatId.value)
+  const catId = currentCatId.value || 'default'
+  const cfg = getFeederConfig(catId)
   isActive.value = cfg.is_active
   scheduleList.value = cfg.schedule.map(item => ({ ...item }))
   defaultBrand.value = cfg.default_brand || ''
@@ -360,8 +374,9 @@ const saveSettings = async (silent: boolean = false, customMsg: string = '托管
     isActive.value = false
   }
 
+  const catId = currentCatId.value || 'default'
   const config: AutoFeederConfig = {
-    cat_id: currentCatId.value,
+    cat_id: catId,
     is_active: isActive.value && isConfigValid.value,
     schedule: scheduleList.value.map(item => ({
       time: item.time,
@@ -392,38 +407,18 @@ const saveSettings = async (silent: boolean = false, customMsg: string = '托管
 
   if (config.is_active) {
     // 立即静默触发一次对齐
-    checkAndSyncAutoFeeder(currentCatId.value).catch(err => {
+    checkAndSyncAutoFeeder(catId).catch(err => {
       console.log('feeder sync catch', err)
     })
   }
 }
 
-// 常用标签管理
-const allFoodTags = computed(() => Array.from(new Set([...customFoodList.value, ...defaultFoodTags])))
-const allExtraTags = computed(() => Array.from(new Set([...customExtraList.value, ...defaultExtraTags])))
-const isCustomFood = (tag: string) => customFoodList.value.includes(tag)
-const isCustomExtra = (tag: string) => customExtraList.value.includes(tag)
-
 const saveCustomBrand = () => {
-  const b = defaultBrand.value.trim()
-  if (!b) return
-  if (!customFoodList.value.includes(b)) {
-    const updated = [b, ...customFoodList.value]
-    customFoodList.value = updated
-    uni.setStorageSync('custom_food_brands', updated)
-    uni.showToast({ title: '已保存常用罐头', icon: 'success' })
-  }
+  addCustomFood(defaultBrand.value)
 }
 
 const saveCustomExtras = () => {
-  const e = defaultExtras.value.trim()
-  if (!e) return
-  if (!customExtraList.value.includes(e)) {
-    const updated = [e, ...customExtraList.value]
-    customExtraList.value = updated
-    uni.setStorageSync('custom_extras', updated)
-    uni.showToast({ title: '已保存常用补剂', icon: 'success' })
-  }
+  addCustomExtra(defaultExtras.value)
 }
 
 const appendExtra = (tag: string) => {
@@ -435,40 +430,13 @@ const appendExtra = (tag: string) => {
 }
 
 const onLongPressFood = (tag: string) => {
-  if (!customFoodList.value.includes(tag)) return
-  uni.showModal({
-    title: '删除常用罐头',
-    content: `确定删除自定义罐头「${tag}」吗？`,
-    confirmText: '删除',
-    confirmColor: '#E74C3C',
-    success: (res) => {
-      if (res.confirm) {
-        const updated = customFoodList.value.filter(item => item !== tag)
-        customFoodList.value = updated
-        uni.setStorageSync('custom_food_brands', updated)
-        if (defaultBrand.value === tag) defaultBrand.value = ''
-        uni.showToast({ title: '已删除常用罐头', icon: 'success' })
-      }
-    }
+  confirmRemoveFood(tag, (removed) => {
+    if (defaultBrand.value === removed) defaultBrand.value = ''
   })
 }
 
 const onLongPressExtra = (tag: string) => {
-  if (!customExtraList.value.includes(tag)) return
-  uni.showModal({
-    title: '删除常用补剂',
-    content: `确定删除自定义补剂「${tag}」吗？`,
-    confirmText: '删除',
-    confirmColor: '#E74C3C',
-    success: (res) => {
-      if (res.confirm) {
-        const updated = customExtraList.value.filter(item => item !== tag)
-        customExtraList.value = updated
-        uni.setStorageSync('custom_extras', updated)
-        uni.showToast({ title: '已删除常用补剂', icon: 'success' })
-      }
-    }
-  })
+  confirmRemoveExtra(tag)
 }
 </script>
 

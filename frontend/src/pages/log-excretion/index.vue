@@ -126,14 +126,19 @@
     </view>
 
     <button class="btn btn-primary submit-btn" :loading="isSubmitting" @click="submitRecord">
-      保存排泄记录
+      {{ isEditMode ? '保存修改' : '保存排泄记录' }}
     </button>
   </view>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
 import { callApi, getLocalTodayDate, getLocalCurrentTime, makeLocalTimestamp, safeNavigateBack } from '@/utils/api'
+import { useCustomPresets } from '@/composables/useCustomPresets'
+
+const isEditMode = ref(false)
+const editRecordId = ref('')
 
 const urineOptions = [
   '正常 (3~4团)',
@@ -156,66 +161,44 @@ const stoolStatusIndex = ref(0)
 const quickStoolTags = ['正常成型', '干硬颗粒', '软便', '未排便']
 
 const defaultStoolColors = ['正常深褐色', '浅黄褐色', '黑色/柏油样', '带血丝/黏液']
-const customStoolColorList = ref<string[]>([])
+const {
+  customList: customStoolColorList,
+  allOptions: stoolColorOptions,
+  isCustom: isCustomStoolColorTag,
+  addCustom: addCustomStoolColor,
+  confirmRemoveCustom: confirmRemoveStoolColor
+} = useCustomPresets({
+  storageKey: 'custom_stool_colors',
+  defaultItems: defaultStoolColors,
+  appendOtherOption: true,
+  deleteModalTitle: '删除快捷特征',
+  savedToastText: '已保存为常用选项',
+  deletedToastText: '已删除常用特征'
+})
+
 const stoolColorIndex = ref(0)
 const customStoolColorText = ref('')
-
-const loadSavedColors = () => {
-  const saved = uni.getStorageSync('custom_stool_colors')
-  if (saved && Array.isArray(saved)) {
-    customStoolColorList.value = saved
-  }
-}
-
-onMounted(() => {
-  loadSavedColors()
-})
-
-const stoolColorOptions = computed(() => {
-  return [...defaultStoolColors, ...customStoolColorList.value, '其他']
-})
 
 const isCustomStoolColor = computed(() => {
   return stoolColorOptions.value[stoolColorIndex.value] === '其他'
 })
 
-const isCustomStoolColorTag = (opt: string) => customStoolColorList.value.includes(opt)
-
 const saveCustomStoolColor = () => {
   const text = customStoolColorText.value.trim()
   if (!text) return
-  if (!customStoolColorList.value.includes(text) && !defaultStoolColors.includes(text)) {
-    const updated = [...customStoolColorList.value, text]
-    customStoolColorList.value = updated
-    uni.setStorageSync('custom_stool_colors', updated)
-    uni.showToast({ title: '已保存为常用选项', icon: 'success' })
+  if (addCustomStoolColor(text)) {
     setTimeout(() => {
       const newIdx = stoolColorOptions.value.findIndex(item => item === text)
       if (newIdx !== -1) {
         stoolColorIndex.value = newIdx
       }
     }, 100)
-  } else {
-    uni.showToast({ title: '该选项已在常用列表中', icon: 'none' })
   }
 }
 
 const onLongPressStoolColor = (opt: string) => {
-  if (!customStoolColorList.value.includes(opt)) return
-  uni.showModal({
-    title: '删除快捷特征',
-    content: `确定要删除自定义选项「${opt}」吗？`,
-    confirmText: '删除',
-    confirmColor: '#E74C3C',
-    success: (res) => {
-      if (res.confirm) {
-        const updated = customStoolColorList.value.filter(item => item !== opt)
-        customStoolColorList.value = updated
-        uni.setStorageSync('custom_stool_colors', updated)
-        stoolColorIndex.value = 0
-        uni.showToast({ title: '已删除常用特征', icon: 'success' })
-      }
-    }
+  confirmRemoveStoolColor(opt, () => {
+    stoolColorIndex.value = 0
   })
 }
 
@@ -228,6 +211,40 @@ const formData = ref({
   date: currentDate,
   time: currentTime,
   note: ''
+})
+
+onLoad((options: any) => {
+  if (options && options.edit === '1' && options.id) {
+    const cached = uni.getStorageSync('editing_record')
+    if (cached && cached._id === options.id) {
+      isEditMode.value = true
+      editRecordId.value = cached._id
+      uni.setNavigationBarTitle({ title: '编辑排泄记录' })
+      formData.value.date = cached.record_date || currentDate
+      formData.value.time = cached.record_time || cached.measure_time || currentTime
+      formData.value.note = cached.note || ''
+      if (cached.urine) {
+        const uIdx = urineOptions.indexOf(cached.urine)
+        if (uIdx !== -1) urineIndex.value = uIdx
+      }
+      if (cached.stool_status) {
+        const sIdx = stoolStatusOptions.indexOf(cached.stool_status)
+        if (sIdx !== -1) stoolStatusIndex.value = sIdx
+      }
+      if (cached.stool_color) {
+        const cIdx = stoolColorOptions.value.indexOf(cached.stool_color)
+        if (cIdx !== -1) {
+          stoolColorIndex.value = cIdx
+        } else {
+          const otherIdx = stoolColorOptions.value.indexOf('其他')
+          if (otherIdx !== -1) {
+            stoolColorIndex.value = otherIdx
+            customStoolColorText.value = cached.stool_color
+          }
+        }
+      }
+    }
+  }
 })
 
 const setQuickUrine = (tag: string) => {
@@ -282,9 +299,10 @@ const submitRecord = async () => {
     }
 
     const recordDateTime = makeLocalTimestamp(formData.value.date, formData.value.time)
+    const catId = uni.getStorageSync('currentCatId') || 'default'
 
     const recordData = {
-      cat_id: uni.getStorageSync('currentCatId') || 'default',
+      cat_id: catId,
       urine: urineVal,
       stool_status: stoolStatusVal,
       stool_color: stoolColorVal,
@@ -294,9 +312,19 @@ const submitRecord = async () => {
       createTime: recordDateTime
     }
     
-    await callApi('addRecord', { type: 'excretion_records', recordData })
-    
-    uni.showToast({ title: '排泄记录成功', icon: 'success' })
+    if (isEditMode.value && editRecordId.value) {
+      await callApi('updateRecord', {
+        catId,
+        type: 'excretion_records',
+        recordId: editRecordId.value,
+        recordData
+      })
+      uni.removeStorageSync('editing_record')
+      uni.showToast({ title: '修改成功', icon: 'success' })
+    } else {
+      await callApi('addRecord', { type: 'excretion_records', recordData })
+      uni.showToast({ title: '排泄记录成功', icon: 'success' })
+    }
     setTimeout(() => {
       safeNavigateBack()
     }, 1500)

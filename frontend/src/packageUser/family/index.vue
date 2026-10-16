@@ -38,38 +38,46 @@
 import { onShareAppMessage, onLoad } from '@dcloudio/uni-app'
 import { ref } from 'vue'
 import { callApi } from '@/utils/api'
+import { useCatSession } from '@/composables/useCatSession'
 
 const openid = ref('')
 const familyMembers = ref<any[]>([])
 const isLoading = ref(true)
 const currentUserInfo = ref<any>({})
 const isCurrentUserAdmin = ref(false)
+const { fetchCats, myOpenid } = useCatSession()
 
 const loadMembers = async () => {
   isLoading.value = true
   try {
-    const res = await callApi('getCats')
+    const cats = await fetchCats()
+    if (!openid.value && myOpenid.value) {
+      openid.value = myOpenid.value
+    }
+
     const members = new Set<string>()
     const creators = new Set<string>()
     
-    members.add(openid.value)
+    if (openid.value) {
+      members.add(openid.value)
+    }
 
-    if (res.data) {
-      res.data.forEach((cat: any) => {
+    if (cats && cats.length > 0) {
+      cats.forEach((cat: any) => {
         if (cat._openid) {
           members.add(cat._openid)
           creators.add(cat._openid)
         }
         if (cat.shared_with && Array.isArray(cat.shared_with)) {
           cat.shared_with.forEach((id: string) => {
-            members.add(id)
+            if (id) members.add(id)
           })
         }
       })
     }
     
-    isCurrentUserAdmin.value = creators.has(openid.value) || creators.size === 0
-    const uniqueIds = Array.from(members)
+    isCurrentUserAdmin.value = (Boolean(openid.value) && creators.has(openid.value)) || creators.size === 0
+    const uniqueIds = Array.from(members).filter(Boolean)
     
     if (uniqueIds.length > 0) {
       try {
@@ -78,7 +86,7 @@ const loadMembers = async () => {
           familyMembers.value = uniqueIds.map(id => {
             const user = usersRes.data.find((u: any) => u._openid === id)
             let matchedUser = user
-            if (!matchedUser && id === openid.value) {
+            if (!matchedUser && id === openid.value && currentUserInfo.value?.nickName) {
               matchedUser = currentUserInfo.value
             }
             
@@ -87,7 +95,7 @@ const loadMembers = async () => {
             const isMeStr = id === openid.value ? ' (我)' : ''
             
             return matchedUser 
-              ? { ...matchedUser, displayRole: roleStr + isMeStr }
+              ? { ...matchedUser, _openid: id, displayRole: roleStr + isMeStr }
               : { _openid: id, nickName: `家人 (ID: ${id.substring(0, 6)}***)`, displayRole: roleStr + isMeStr }
           })
           
@@ -131,9 +139,13 @@ const prepareInvite = async (): Promise<string> => {
 onLoad(() => {
   const cachedInfo = uni.getStorageSync('userInfo')
   if (cachedInfo) {
-    const userInfo = JSON.parse(cachedInfo)
-    openid.value = userInfo.openid
-    currentUserInfo.value = userInfo
+    try {
+      const userInfo = typeof cachedInfo === 'string' ? JSON.parse(cachedInfo) : cachedInfo
+      openid.value = userInfo.openid || ''
+      currentUserInfo.value = userInfo
+    } catch (e) {
+      // ignore parse error
+    }
   }
   loadMembers()
   prepareInvite()

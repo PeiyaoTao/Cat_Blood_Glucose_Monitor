@@ -192,8 +192,11 @@
     <!-- 全屏深度趋势分析模态窗 -->
     <FullscreenAnalysisModal 
       v-model:visible="showFullscreenModal"
-      :glucoseRecords="rawGlucoseData"
-      :weightRecords="rawWeightData"
+      :glucoseRecords="fullscreenGlucoseData"
+      :weightRecords="fullscreenWeightData"
+      :insulinRecords="fullscreenInsulinData"
+      :mealRecords="fullscreenMealData"
+      :excretionRecords="fullscreenExcretionData"
       :targetMin="catInfo.targetMin"
       :targetMax="catInfo.targetMax"
       @close="handleCloseFullscreen"
@@ -206,8 +209,25 @@ import { ref, computed, nextTick, getCurrentInstance, onUnmounted } from 'vue'
 import { onShow, onLoad, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
 import FullscreenAnalysisModal from '@/components/FullscreenAnalysisModal.vue'
 import { callApi, consumeDataDirty, daysSinceLocalDate } from '@/utils/api'
+import {
+  DEFAULT_TARGET_MIN,
+  DEFAULT_TARGET_MAX,
+  evaluateGlucoseStatus,
+  normalizeTargetRange,
+  calculateCatAge
+} from '@/utils/glucoseDomain'
+import {
+  computeWeightScale,
+  drawSelectionBeam,
+  drawContinuousPolyline,
+  drawClampedPointLabel,
+  drawClampedXAxisLabel
+} from '@/utils/chartRenderer'
+import { useCatSession } from '@/composables/useCatSession'
 import { useChartGestures } from '@/composables/useChartGestures'
 import { checkAndSyncAutoFeeder } from '@/utils/feederSync'
+
+const { allCats, currentCat, fetchCats, selectCat } = useCatSession()
 
 onLoad(async (options: any) => {
   if (options && options.invite) {
@@ -253,19 +273,81 @@ const catInfo = ref({
   _id: '',
   avatar: '',
   name: '小煤球',
-  age: 0 as number | null,
+  age: null as number | null,
   daysSinceDiagnosis: 0,
   diagnosisDays: 0,
-  targetMin: 5.0,
-  targetMax: 15.0,
+  targetMin: DEFAULT_TARGET_MIN,
+  targetMax: DEFAULT_TARGET_MAX,
   thresholdNormalMax: 7.0,
-  thresholdDangerMin: 15.0
+  thresholdDangerMin: DEFAULT_TARGET_MAX
 })
-const allCats = ref<any[]>([])
+
+const currentChartTab = ref<'glucose' | 'weight'>('glucose')
+const recentRecords = ref<any[]>([])
+const recentInsulins = ref<any[]>([])
+const rawGlucoseData = ref<any[]>([])
+const rawWeightData = ref<any[]>([])
+const fullGlucoseData = ref<any[] | null>(null)
+const fullWeightData = ref<any[] | null>(null)
+const fullInsulinData = ref<any[]>([])
+const fullMealData = ref<any[]>([])
+const fullExcretionData = ref<any[]>([])
+let fullDataLoadedCatId = ''
+let fullDataLoadedAt = 0
+
+const fullscreenGlucoseData = computed(() => fullGlucoseData.value || rawGlucoseData.value)
+const fullscreenWeightData = computed(() => fullWeightData.value || rawWeightData.value)
+const fullscreenInsulinData = computed(() => fullInsulinData.value)
+const fullscreenMealData = computed(() => fullMealData.value)
+const fullscreenExcretionData = computed(() => fullExcretionData.value)
 
 const showFullscreenModal = ref(false)
-const openFullscreen = () => {
+const openFullscreen = async () => {
   showFullscreenModal.value = true
+  const catId = catInfo.value._id
+  if (!catId) return
+
+  // 若当前猫咪尚未拉取全量分析数据，按需后台补齐供日内曲线/多维事件叠加及趋势分析使用
+  const needsFullFetch = fullDataLoadedCatId !== catId || fullDataLoadedAt < lastLoadedAt
+  if (needsFullFetch) {
+    fullDataLoadedCatId = catId
+    fullDataLoadedAt = lastLoadedAt
+    try {
+      const tasks: Promise<any>[] = []
+      if (rawGlucoseData.value.length >= 30) {
+        tasks.push(
+          callApi('getRecords', { catId, type: 'blood_glucose', limit: 1000 }).then(res => {
+            if (res.data) fullGlucoseData.value = res.data
+          })
+        )
+      } else {
+        fullGlucoseData.value = rawGlucoseData.value
+      }
+      if (rawWeightData.value.length >= 30) {
+        tasks.push(
+          callApi('getRecords', { catId, type: 'weight_records', limit: 1000 }).then(res => {
+            if (res.data) fullWeightData.value = res.data
+          })
+        )
+      } else {
+        fullWeightData.value = rawWeightData.value
+      }
+      tasks.push(
+        callApi('getRecords', { catId, type: 'insulin_records', limit: 500 }).then(res => {
+          if (res.data) fullInsulinData.value = res.data
+        }),
+        callApi('getRecords', { catId, type: 'meal_records', limit: 500 }).then(res => {
+          if (res.data) fullMealData.value = res.data
+        }),
+        callApi('getRecords', { catId, type: 'excretion_records', limit: 500 }).then(res => {
+          if (res.data) fullExcretionData.value = res.data
+        })
+      )
+      if (tasks.length > 0) await Promise.all(tasks)
+    } catch (e) {
+      console.warn('获取全屏趋势全量记录提示:', e)
+    }
+  }
 }
 const handleCloseFullscreen = () => {
   showFullscreenModal.value = false
@@ -285,12 +367,6 @@ const greetingText = computed(() => {
   if (hour < 18) return '下午好，铲屎官'
   return '晚上好，铲屎官'
 })
-
-const currentChartTab = ref<'glucose' | 'weight'>('glucose')
-const recentRecords = ref<any[]>([])
-const recentInsulins = ref<any[]>([])
-const rawGlucoseData = ref<any[]>([])
-const rawWeightData = ref<any[]>([])
 
 // Canvas 2D 实体引用与布局尺寸
 const instance = getCurrentInstance()
@@ -355,25 +431,22 @@ const formatItemDate = (item: any) => {
 }
 
 const getStatusMeta = (bg: number) => {
-  const min = (catInfo.value.targetMin !== undefined && !isNaN(Number(catInfo.value.targetMin))) ? Number(catInfo.value.targetMin) : 4.0
-  const max = (catInfo.value.targetMax !== undefined && !isNaN(Number(catInfo.value.targetMax))) ? Number(catInfo.value.targetMax) : 15.0
-  const warningMax = max * 1.3
-
-  if (bg <= 0) {
-    return { color: '#94A3B8', text: '无数据', badgeClass: 'badge-gray' }
-  } else if (bg < min) {
-    return { color: '#DC2626', text: '低血糖', badgeClass: 'badge-red' }
-  } else if (bg <= max) {
-    return { color: '#16A34A', text: '达标', badgeClass: 'badge-green' }
-  } else if (bg <= warningMax) {
-    return { color: '#CA8A04', text: '偏高', badgeClass: 'badge-yellow' }
-  } else {
-    return { color: '#DC2626', text: '危险过高', badgeClass: 'badge-red' }
-  }
+  return evaluateGlucoseStatus(bg, catInfo.value.targetMin, catInfo.value.targetMax)
 }
 
 // 统一当前展示的数据切片列表
-const currentChartItems = computed(() => {
+const currentChartItems = computed<Array<{
+  id: any
+  date: string
+  dayNum: string
+  time: string
+  value: number
+  status: string
+  color: string
+  textColor: string
+  badgeClass: string
+  statusText: string
+}>>(() => {
   if (currentChartTab.value === 'glucose') {
     const chartItems = [...rawGlucoseData.value].reverse()
     return chartItems.map((item, idx) => {
@@ -604,7 +677,7 @@ onUnmounted(() => {
 // Canvas 2D 初始化
 const initMainCanvas = (callback?: () => void) => {
   const query = uni.createSelectorQuery().in(instance?.proxy || instance)
-  query.select('#mainChartCanvas').fields({ node: true, size: true, rect: true })
+  query.select('#mainChartCanvas').fields({ node: true, size: true, rect: true }, () => {})
   query.select('.main-chart-canvas-box').boundingClientRect()
   query.exec((res) => {
     if (res && res[0] && res[0].node) {
@@ -628,48 +701,24 @@ const initMainCanvas = (callback?: () => void) => {
   })
 }
 
-const fetchCatProfile = async () => {
+const fetchCatProfile = async (force: boolean = false) => {
   try {
-    const res = await callApi('getCats')
-    if (res.data && res.data.length > 0) {
-      allCats.value = res.data
-      let currentCatId = uni.getStorageSync('currentCatId')
-      let cat = res.data.find((c: any) => c._id === currentCatId)
-      if (!cat) {
-        cat = res.data[0]
-        uni.setStorageSync('currentCatId', cat._id)
-      }
-      
+    await fetchCats(force)
+    const cat = currentCat.value
+    if (cat) {
       catInfo.value._id = cat._id
       catInfo.value.name = cat.name || '未命名'
       catInfo.value.avatar = cat.avatar || ''
-      
-      if (cat.birthday) {
-        const bDate = new Date(cat.birthday)
-        const today = new Date()
-        let ageNum = today.getFullYear() - bDate.getFullYear()
-        const m = today.getMonth() - bDate.getMonth()
-        if (m < 0 || (m === 0 && today.getDate() < bDate.getDate())) {
-            ageNum--
-        }
-        catInfo.value.age = Math.max(0, ageNum)
-      } else {
-        catInfo.value.age = 0
-      }
-      
-      if (cat.diagnosis_date) {
-        catInfo.value.daysSinceDiagnosis = daysSinceLocalDate(cat.diagnosis_date)
-      } else {
-        catInfo.value.daysSinceDiagnosis = 0
-      }
-      
-      catInfo.value.targetMin = (cat.targetMin !== undefined && !isNaN(Number(cat.targetMin))) ? Number(cat.targetMin) : 4.0
-      catInfo.value.targetMax = (cat.targetMax !== undefined && !isNaN(Number(cat.targetMax))) ? Number(cat.targetMax) : 15.0
-      catInfo.value.thresholdDangerMin = catInfo.value.targetMax
-      catInfo.value.thresholdNormalMax = catInfo.value.targetMax
+      catInfo.value.age = calculateCatAge(cat.birthday)
+      catInfo.value.daysSinceDiagnosis = cat.diagnosis_date ? daysSinceLocalDate(cat.diagnosis_date) : 0
+
+      const { min, max } = normalizeTargetRange(cat.targetMin, cat.targetMax)
+      catInfo.value.targetMin = min
+      catInfo.value.targetMax = max
+      catInfo.value.thresholdDangerMin = max
+      catInfo.value.thresholdNormalMax = max
     } else {
       catInfo.value._id = ''
-      allCats.value = []
     }
   } catch (err) {
     console.error('获取猫咪信息失败', err)
@@ -700,6 +749,7 @@ const fetchRecentRecords = async () => {
         }
       })
       rawGlucoseData.value = res.data
+      fullGlucoseData.value = null
       if (currentChartTab.value === 'glucose') renderChart()
     }
   } catch (err) {
@@ -713,6 +763,7 @@ const fetchRecentWeights = async () => {
     const res = await callApi('getRecords', { catId: catInfo.value._id, type: 'weight_records', limit: 30 })
     if (res.data) {
       rawWeightData.value = res.data
+      fullWeightData.value = null
       if (currentChartTab.value === 'weight') renderChart()
     }
   } catch (err) {
@@ -847,8 +898,7 @@ const drawMainChart = () => {
     ctx.fillText('0', padLeft - 6, bottomY + 3)
 
     // 目标参考线：上限红色虚线，下限绿色虚线 (纯净线条，无文字标签)
-    const targetMax = catInfo.value.targetMax || 15.0
-    const targetMin = catInfo.value.targetMin || 4.0
+    const { min: targetMin, max: targetMax } = normalizeTargetRange(catInfo.value.targetMin, catInfo.value.targetMax)
 
     const yMax = getY(targetMax)
     ctx.setLineDash([4, 2])
@@ -874,17 +924,7 @@ const drawMainChart = () => {
 
     if (selectedPointIndex.value >= 0 && selectedPointIndex.value < items.length) {
       const selX = padLeft + selectedPointIndex.value * spacing + scrollX
-      const beamW = 28
-      ctx.fillStyle = 'rgba(59, 130, 246, 0.08)'
-      ctx.fillRect(selX - beamW / 2, topY - 5, beamW, bottomY - topY + 10)
-
-      ctx.setLineDash([3, 3])
-      ctx.strokeStyle = 'rgba(59, 130, 246, 0.5)'
-      ctx.beginPath()
-      ctx.moveTo(selX, topY - 5)
-      ctx.lineTo(selX, bottomY)
-      ctx.stroke()
-      ctx.setLineDash([])
+      drawSelectionBeam(ctx, selX, topY, bottomY, 28)
     }
 
     // 折线
@@ -896,19 +936,7 @@ const drawMainChart = () => {
       }
     })
 
-    if (validPoints.length > 0) {
-      ctx.beginPath()
-      ctx.strokeStyle = '#64748B'
-      ctx.lineWidth = 2.2
-      ctx.lineCap = 'round'
-      ctx.lineJoin = 'round'
-
-      ctx.moveTo(validPoints[0].x, validPoints[0].y)
-      for (let j = 1; j < validPoints.length; j++) {
-        ctx.lineTo(validPoints[j].x, validPoints[j].y)
-      }
-      ctx.stroke()
-    }
+    drawContinuousPolyline(ctx, validPoints, '#64748B', 2.2)
 
     // 数据点与数值 (按血糖标准着色)
     const showNumbers = currentZoomCount.value <= 8
@@ -931,24 +959,17 @@ const drawMainChart = () => {
         ctx.stroke()
 
         if (showNumbers) {
-          ctx.fillStyle = meta.color
-          ctx.font = 'bold 11px sans-serif'
-          const textStr = item.value.toFixed(1)
-          const numW = (ctx.measureText ? ctx.measureText(textStr).width : 0) || 24
-          const halfNumW = numW / 2
-
-          let drawNumX = x
-          const safeTextLeft = padLeft - 2 + halfNumW
-          const safeTextRight = mainCanvasWidth - 4 - halfNumW
-          if (drawNumX < safeTextLeft && x >= padLeft - 6) {
-            drawNumX = safeTextLeft
-          } else if (drawNumX > safeTextRight && x <= padRight + 10) {
-            drawNumX = safeTextRight
-          }
-
-          const textY = Math.max(16, y - 7)
-          ctx.textAlign = 'center'
-          ctx.fillText(textStr, drawNumX, textY)
+          drawClampedPointLabel(
+            ctx,
+            item.value.toFixed(1),
+            x,
+            Math.max(16, y - 7),
+            padLeft,
+            padRight,
+            mainCanvasWidth,
+            meta.color,
+            'bold 11px sans-serif'
+          )
         }
       }
     })
@@ -966,22 +987,16 @@ const drawMainChart = () => {
 
       if (showX) {
         const isCur = selectedPointIndex.value === i
-        ctx.fillStyle = isCur ? '#0F172A' : '#64748B'
-        ctx.font = isCur ? 'bold 11px sans-serif' : '10px sans-serif'
-
-        const textW = (ctx.measureText ? ctx.measureText(item.dayNum).width : 0) || 28
-        const halfW = textW / 2
-        let drawX = x
-        const safeLeft = padLeft - 2
-        const safeRight = mainCanvasWidth - 6
-        if (drawX - halfW < safeLeft) {
-          drawX = safeLeft + halfW
-        } else if (drawX + halfW > safeRight) {
-          drawX = safeRight - halfW
-        }
-
-        ctx.textAlign = 'center'
-        ctx.fillText(item.dayNum, drawX, bottomY + 16)
+        drawClampedXAxisLabel(
+          ctx,
+          item.dayNum,
+          x,
+          bottomY + 16,
+          padLeft,
+          mainCanvasWidth,
+          isCur ? '#0F172A' : '#64748B',
+          isCur ? 'bold 11px sans-serif' : '10px sans-serif'
+        )
       }
     })
   } else {
@@ -990,45 +1005,14 @@ const drawMainChart = () => {
       .filter(i => typeof i.value === 'number' && i.value > 0)
       .map(i => i.value as number)
 
-    let minWeight = 3.0
-    let maxWeight = 6.0
-
-    if (validWts.length > 0) {
-      const dataMin = Math.min(...validWts)
-      const dataMax = Math.max(...validWts)
-
-      // 保证高于最大数据点至少 0.8~1.0kg 空间，彻底杜绝压顶现象
-      if (dataMax > 5.2) {
-        maxWeight = Math.ceil((dataMax + 0.8) * 2) / 2
-      } else {
-        maxWeight = 6.0
-      }
-
-      if (dataMin < 3.0) {
-        minWeight = Math.max(0, Math.floor((dataMin - 0.8) * 2) / 2)
-      } else if (dataMin >= 5.0 && minWeight === 3.0) {
-        minWeight = Math.floor((dataMin - 0.8) * 2) / 2
-      }
-    }
-
-    if (maxWeight - minWeight < 2.0) {
-      const mid = (maxWeight + minWeight) / 2
-      minWeight = Math.max(0, Math.floor((mid - 1.0) * 2) / 2)
-      maxWeight = minWeight + 2.0
-    }
-
-    const weightSpan = maxWeight - minWeight
-    const getY = (wt: number) => {
-      const clamped = Math.max(minWeight, Math.min(maxWeight, wt))
-      return bottomY - ((clamped - minWeight) / weightSpan) * (bottomY - topY)
-    }
+    const { minWeight, maxWeight, midWeight, getY: calcWtY } = computeWeightScale(validWts)
+    const getY = (wt: number) => calcWtY(wt, topY, bottomY)
 
     // 1. 固定网格与 Y 轴刻度
     ctx.lineWidth = 1
     ctx.setLineDash([3, 3])
     ctx.strokeStyle = '#E2E8F0'
 
-    const midWeight = Number(((minWeight + maxWeight) / 2).toFixed(1))
     const gridSteps = [maxWeight, midWeight]
 
     gridSteps.forEach(v => {
@@ -1061,17 +1045,7 @@ const drawMainChart = () => {
 
     if (selectedPointIndex.value >= 0 && selectedPointIndex.value < items.length) {
       const selX = padLeft + selectedPointIndex.value * spacing + scrollX
-      const beamW = 28
-      ctx.fillStyle = 'rgba(59, 130, 246, 0.08)'
-      ctx.fillRect(selX - beamW / 2, topY - 5, beamW, bottomY - topY + 10)
-
-      ctx.setLineDash([3, 3])
-      ctx.strokeStyle = 'rgba(59, 130, 246, 0.5)'
-      ctx.beginPath()
-      ctx.moveTo(selX, topY - 5)
-      ctx.lineTo(selX, bottomY)
-      ctx.stroke()
-      ctx.setLineDash([])
+      drawSelectionBeam(ctx, selX, topY, bottomY, 28)
     }
 
     // 绘制体重蓝色折线
@@ -1083,19 +1057,7 @@ const drawMainChart = () => {
       }
     })
 
-    if (validPoints.length > 0) {
-      ctx.beginPath()
-      ctx.strokeStyle = '#3B82F6'
-      ctx.lineWidth = 2.2
-      ctx.lineCap = 'round'
-      ctx.lineJoin = 'round'
-
-      ctx.moveTo(validPoints[0].x, validPoints[0].y)
-      for (let j = 1; j < validPoints.length; j++) {
-        ctx.lineTo(validPoints[j].x, validPoints[j].y)
-      }
-      ctx.stroke()
-    }
+    drawContinuousPolyline(ctx, validPoints, '#3B82F6', 2.2)
 
     // 绘制体重点与数值
     const showNumbers = currentZoomCount.value <= 8
@@ -1117,25 +1079,17 @@ const drawMainChart = () => {
         ctx.stroke()
 
         if (showNumbers) {
-          ctx.fillStyle = '#2563EB'
-          ctx.font = 'bold 11px sans-serif'
-          const textStr = item.value.toFixed(2)
-          const numW = (ctx.measureText ? ctx.measureText(textStr).width : 0) || 24
-          const halfNumW = numW / 2
-
-          let drawNumX = x
-          const safeTextLeft = padLeft - 2 + halfNumW
-          const safeTextRight = mainCanvasWidth - 4 - halfNumW
-          if (drawNumX < safeTextLeft && x >= padLeft - 6) {
-            drawNumX = safeTextLeft
-          } else if (drawNumX > safeTextRight && x <= padRight + 10) {
-            drawNumX = safeTextRight
-          }
-
-          // 充足呼吸余量：保证数字与点绝不上溢压顶
-          const textY = Math.max(16, y - 7)
-          ctx.textAlign = 'center'
-          ctx.fillText(textStr, drawNumX, textY)
+          drawClampedPointLabel(
+            ctx,
+            item.value.toFixed(2),
+            x,
+            Math.max(16, y - 7),
+            padLeft,
+            padRight,
+            mainCanvasWidth,
+            '#2563EB',
+            'bold 11px sans-serif'
+          )
         }
       }
     })
@@ -1153,22 +1107,16 @@ const drawMainChart = () => {
 
       if (showX) {
         const isCur = selectedPointIndex.value === i
-        ctx.fillStyle = isCur ? '#0F172A' : '#64748B'
-        ctx.font = isCur ? 'bold 11px sans-serif' : '10px sans-serif'
-
-        const textW = (ctx.measureText ? ctx.measureText(item.dayNum).width : 0) || 28
-        const halfW = textW / 2
-        let drawX = x
-        const safeLeft = padLeft - 2
-        const safeRight = mainCanvasWidth - 6
-        if (drawX - halfW < safeLeft) {
-          drawX = safeLeft + halfW
-        } else if (drawX + halfW > safeRight) {
-          drawX = safeRight - halfW
-        }
-
-        ctx.textAlign = 'center'
-        ctx.fillText(item.dayNum, drawX, bottomY + 16)
+        drawClampedXAxisLabel(
+          ctx,
+          item.dayNum,
+          x,
+          bottomY + 16,
+          padLeft,
+          mainCanvasWidth,
+          isCur ? '#0F172A' : '#64748B',
+          isCur ? 'bold 11px sans-serif' : '10px sans-serif'
+        )
       }
     })
   }
@@ -1203,23 +1151,6 @@ const fetchRecentInsulins = async () => {
   }
 }
 
-const formatDisplayTime = (date: Date) => {
-  if (!date) return '未知时间'
-  const d = new Date(date)
-  const now = new Date()
-  
-  const isToday = d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
-  
-  const pad = (n: number) => n.toString().padStart(2, '0')
-  const timeStr = `${pad(d.getHours())}:${pad(d.getMinutes())}`
-  
-  if (isToday) {
-    return `今天 ${timeStr}`
-  } else {
-    return `${d.getMonth() + 1}/${d.getDate()} ${timeStr}`
-  }
-}
-
 // 首页数据缓存策略：仅在数据变更 / 切换猫咪 / 超过 5 分钟时才重新拉取，避免每次返回首页都发起 5+ 次云函数调用
 const DATA_STALE_MS = 5 * 60 * 1000
 let lastLoadedAt = 0
@@ -1234,7 +1165,7 @@ const loadAllData = async (force: boolean = false) => {
   }
   lastLoadedAt = Date.now()
 
-  await fetchCatProfile()
+  await fetchCatProfile(force || dirty)
   lastLoadedCatId = catInfo.value._id
   if (catInfo.value._id) {
     // 异步后台静默执行自动喂食机对齐补录（云端幂等），不阻塞核心健康数据拉取
@@ -1267,8 +1198,8 @@ const handleSwitchCat = () => {
         uni.navigateTo({ url: '/packageUser/cat-profile/index' })
       } else {
         const selectedCat = allCats.value[res.tapIndex]
-        uni.setStorageSync('currentCatId', selectedCat._id)
-        loadAllData()
+        selectCat(selectedCat._id)
+        loadAllData(true)
       }
     }
   })
@@ -1304,19 +1235,7 @@ const goToHistory = () => {
 }
 
 const getGlucoseClass = (val: number) => {
-  const min = (catInfo.value.targetMin !== undefined && !isNaN(Number(catInfo.value.targetMin))) ? Number(catInfo.value.targetMin) : 4.0
-  const max = (catInfo.value.targetMax !== undefined && !isNaN(Number(catInfo.value.targetMax))) ? Number(catInfo.value.targetMax) : 15.0
-  const warningMax = max * 1.3 // 动态超标 30% 缓冲阈值
-
-  if (val < min) {
-    return 'text-danger' // 红色：低于自定义目标下限 (低血糖急症)
-  } else if (val <= max) {
-    return 'text-safe' // 绿色：安全达标区间 [min, max]
-  } else if (val <= warningMax) {
-    return 'text-warning' // 黄色：超出目标上限 30% 以内 (轻中度偏高，需观察)
-  } else {
-    return 'text-danger' // 红色：超出目标上限 30% 以上 (严重高血糖预警)
-  }
+  return evaluateGlucoseStatus(Number(val), catInfo.value.targetMin, catInfo.value.targetMax).homeTextClass
 }
 </script>
 

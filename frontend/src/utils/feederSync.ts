@@ -19,6 +19,10 @@ export interface AutoFeederConfig {
 
 const STORAGE_KEY_PREFIX = 'auto_feeder_config_'
 
+// 并发防重锁与分钟级节流缓存（防止 App.onShow 与 Index.onShow 同时触发两次云函数调用）
+const inFlightSyncMap = new Map<string, Promise<{ syncedCount: number; syncedMeals: string[] }>>()
+const lastSyncedMinuteMap = new Map<string, string>()
+
 const normalizeConfig = (catId: string, raw?: any): AutoFeederConfig => ({
   cat_id: catId || 'default',
   is_active: Boolean(raw?.is_active),
@@ -58,6 +62,8 @@ export const saveFeederConfig = async (config: AutoFeederConfig): Promise<AutoFe
   })
   const saved = normalizeConfig(targetId, res.config || config)
   uni.setStorageSync(STORAGE_KEY_PREFIX + targetId, saved)
+  // 配置变更后清除节流标记，允许立即触发补录
+  lastSyncedMinuteMap.delete(targetId)
   return saved
 }
 
@@ -71,26 +77,51 @@ export const isFeederConfigValid = (config: AutoFeederConfig): boolean => {
 
 // 执行自动喂食机智能对齐补录（Smart Catch-Up）
 // 补录逻辑在云函数中执行：读取云端配置 + 确定性 _id 写入，多设备/多成员同时打开也不会重复
-export const checkAndSyncAutoFeeder = async (targetCatId?: string): Promise<{ syncedCount: number; syncedMeals: string[] }> => {
+export const checkAndSyncAutoFeeder = async (
+  targetCatId?: string,
+  force: boolean = false
+): Promise<{ syncedCount: number; syncedMeals: string[] }> => {
   const catId = targetCatId || uni.getStorageSync('currentCatId')
   if (!catId || catId === 'default') {
     return { syncedCount: 0, syncedMeals: [] }
   }
 
-  try {
-    const res = await callApi('syncAutoFeeder', {
-      catId,
-      today: getLocalTodayDate(),
-      currentTime: getLocalCurrentTime(),
-      tzOffset: new Date().getTimezoneOffset()
-    })
-    const syncedMeals: string[] = res.syncedMeals || []
-    if (syncedMeals.length > 0) {
-      console.log(`[AutoFeeder] 自动同步补齐 ${syncedMeals.length} 顿出餐记录:`, syncedMeals)
-    }
-    return { syncedCount: syncedMeals.length, syncedMeals }
-  } catch (err) {
-    console.error('[AutoFeeder] 自动对齐异常:', err)
+  // 若已有同一猫咪的同步请求在途，直接复用该 Promise
+  const existingTask = inFlightSyncMap.get(catId)
+  if (existingTask) {
+    return existingTask
+  }
+
+  const today = getLocalTodayDate()
+  const currentTime = getLocalCurrentTime()
+  const minuteKey = `${today}_${currentTime}`
+
+  if (!force && lastSyncedMinuteMap.get(catId) === minuteKey) {
     return { syncedCount: 0, syncedMeals: [] }
   }
+
+  const task = (async () => {
+    try {
+      const res = await callApi('syncAutoFeeder', {
+        catId,
+        today,
+        currentTime,
+        tzOffset: new Date().getTimezoneOffset()
+      })
+      lastSyncedMinuteMap.set(catId, minuteKey)
+      const syncedMeals: string[] = res.syncedMeals || []
+      if (syncedMeals.length > 0) {
+        console.log(`[AutoFeeder] 自动同步补齐 ${syncedMeals.length} 顿出餐记录:`, syncedMeals)
+      }
+      return { syncedCount: syncedMeals.length, syncedMeals }
+    } catch (err) {
+      console.error('[AutoFeeder] 自动对齐异常:', err)
+      return { syncedCount: 0, syncedMeals: [] }
+    } finally {
+      inFlightSyncMap.delete(catId)
+    }
+  })()
+
+  inFlightSyncMap.set(catId, task)
+  return task
 }

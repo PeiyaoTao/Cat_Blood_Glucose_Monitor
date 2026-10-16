@@ -119,16 +119,20 @@
     </view>
 
     <button class="btn btn-primary submit-btn" :loading="isSubmitting" @click="submitRecord">
-      保存饮食记录
+      {{ isEditMode ? '保存修改' : '保存饮食记录' }}
     </button>
   </view>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { ref, onMounted } from 'vue'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import { callApi, getLocalTodayDate, getLocalCurrentTime, makeLocalTimestamp, safeNavigateBack } from '@/utils/api'
 import { getFeederConfig, isFeederConfigValid } from '@/utils/feederSync'
+import { useCustomPresets } from '@/composables/useCustomPresets'
+
+const isEditMode = ref(false)
+const editRecordId = ref('')
 
 const mealPeriodOptions = ['早餐 (早针餐)', '午餐/加餐', '晚餐 (晚针餐)', '夜宵/夜间加餐', '常规喂食', '自动喂食机出餐']
 const periodIndex = ref(0)
@@ -158,24 +162,38 @@ const goToAutoFeeder = () => {
 }
 
 const defaultFoodTags = ['巅峰牛肉', 'K9羊肉', '小李子', 'RAWZ兔肉', '冻干主食', '处方低碳粮']
-const customFoodList = ref<string[]>([])
+const {
+  customList: customFoodList,
+  allOptions: allFoodTags,
+  isCustom: isCustomFood,
+  addCustom: addCustomFood,
+  confirmRemoveCustom: confirmRemoveFood
+} = useCustomPresets({
+  storageKey: 'custom_food_brands',
+  defaultItems: defaultFoodTags,
+  insertPosition: 'prepend',
+  deleteModalTitle: '删除常用罐头',
+  savedToastText: '已保存为常用罐头',
+  deletedToastText: '已删除常用罐头'
+})
 
 const defaultExtraTags = ['益生菌', '鱼油', '皮下补水', '辅酶Q10', '维生素B', '乳果糖', '磷结合剂']
-const customExtraList = ref<string[]>([])
-
-const loadSavedPresets = () => {
-  const savedFoods = uni.getStorageSync('custom_food_brands')
-  if (savedFoods && Array.isArray(savedFoods)) {
-    customFoodList.value = savedFoods
-  }
-  const savedExtras = uni.getStorageSync('custom_extras')
-  if (savedExtras && Array.isArray(savedExtras)) {
-    customExtraList.value = savedExtras
-  }
-}
+const {
+  customList: customExtraList,
+  allOptions: allExtraTags,
+  isCustom: isCustomExtra,
+  addCustom: addCustomExtra,
+  confirmRemoveCustom: confirmRemoveExtra
+} = useCustomPresets({
+  storageKey: 'custom_extras',
+  defaultItems: defaultExtraTags,
+  insertPosition: 'prepend',
+  deleteModalTitle: '删除常用补剂',
+  savedToastText: '已保存为常用补剂',
+  deletedToastText: '已删除常用补剂'
+})
 
 onMounted(() => {
-  loadSavedPresets()
   refreshFeederState()
 })
 
@@ -183,78 +201,22 @@ onShow(() => {
   refreshFeederState()
 })
 
-const allFoodTags = computed(() => {
-  return Array.from(new Set([...customFoodList.value, ...defaultFoodTags]))
-})
-
-const allExtraTags = computed(() => {
-  return Array.from(new Set([...customExtraList.value, ...defaultExtraTags]))
-})
-
-const isCustomFood = (tag: string) => customFoodList.value.includes(tag)
-const isCustomExtra = (tag: string) => customExtraList.value.includes(tag)
-
 const saveCustomFoodBrand = () => {
-  const brand = formData.value.food_brand.trim()
-  if (!brand) return
-  if (!customFoodList.value.includes(brand)) {
-    const updated = [brand, ...customFoodList.value]
-    customFoodList.value = updated
-    uni.setStorageSync('custom_food_brands', updated)
-    uni.showToast({ title: '已保存为常用罐头', icon: 'success' })
-  } else {
-    uni.showToast({ title: '该选项已在常用列表中', icon: 'none' })
-  }
+  addCustomFood(formData.value.food_brand)
 }
 
 const onLongPressFood = (tag: string) => {
-  if (!customFoodList.value.includes(tag)) return
-  uni.showModal({
-    title: '删除常用罐头',
-    content: `确定要删除自定义罐头「${tag}」吗？`,
-    confirmText: '删除',
-    confirmColor: '#E74C3C',
-    success: (res) => {
-      if (res.confirm) {
-        const updated = customFoodList.value.filter(item => item !== tag)
-        customFoodList.value = updated
-        uni.setStorageSync('custom_food_brands', updated)
-        if (formData.value.food_brand === tag) formData.value.food_brand = ''
-        uni.showToast({ title: '已删除常用罐头', icon: 'success' })
-      }
-    }
+  confirmRemoveFood(tag, (removed) => {
+    if (formData.value.food_brand === removed) formData.value.food_brand = ''
   })
 }
 
 const saveCustomExtras = () => {
-  const extra = formData.value.extras.trim()
-  if (!extra) return
-  if (!customExtraList.value.includes(extra)) {
-    const updated = [extra, ...customExtraList.value]
-    customExtraList.value = updated
-    uni.setStorageSync('custom_extras', updated)
-    uni.showToast({ title: '已保存为常用补剂', icon: 'success' })
-  } else {
-    uni.showToast({ title: '该选项已在常用列表中', icon: 'none' })
-  }
+  addCustomExtra(formData.value.extras)
 }
 
 const onLongPressExtra = (tag: string) => {
-  if (!customExtraList.value.includes(tag)) return
-  uni.showModal({
-    title: '删除常用补剂',
-    content: `确定要删除自定义补剂「${tag}」吗？`,
-    confirmText: '删除',
-    confirmColor: '#E74C3C',
-    success: (res) => {
-      if (res.confirm) {
-        const updated = customExtraList.value.filter(item => item !== tag)
-        customExtraList.value = updated
-        uni.setStorageSync('custom_extras', updated)
-        uni.showToast({ title: '已删除常用补剂', icon: 'success' })
-      }
-    }
-  })
+  confirmRemoveExtra(tag)
 }
 
 const isSubmitting = ref(false)
@@ -281,6 +243,27 @@ const formData = ref({
   food_brand: '',
   extras: '',
   note: ''
+})
+
+onLoad((options: any) => {
+  if (options && options.edit === '1' && options.id) {
+    const cached = uni.getStorageSync('editing_record')
+    if (cached && cached._id === options.id) {
+      isEditMode.value = true
+      editRecordId.value = cached._id
+      uni.setNavigationBarTitle({ title: '编辑饮食记录' })
+      formData.value.food_grams = cached.food_grams !== undefined ? String(cached.food_grams) : ''
+      formData.value.date = cached.record_date || currentDate
+      formData.value.time = cached.meal_time || currentTime
+      formData.value.food_brand = cached.food_brand || ''
+      formData.value.extras = cached.extras || ''
+      formData.value.note = cached.note || ''
+      if (cached.period) {
+        const pIdx = mealPeriodOptions.indexOf(cached.period)
+        if (pIdx !== -1) periodIndex.value = pIdx
+      }
+    }
+  }
 })
 
 const onPeriodChange = (e: any) => {
@@ -315,9 +298,10 @@ const submitRecord = async () => {
   try {
     const periodName = mealPeriodOptions[periodIndex.value]
     const recordDateTime = makeLocalTimestamp(formData.value.date, formData.value.time)
+    const catId = uni.getStorageSync('currentCatId') || 'default'
 
     const recordData = {
-      cat_id: uni.getStorageSync('currentCatId') || 'default',
+      cat_id: catId,
       food_grams: numValue,
       period: periodName,
       record_date: formData.value.date,
@@ -327,10 +311,27 @@ const submitRecord = async () => {
       note: formData.value.note,
       createTime: recordDateTime
     }
+
+    try {
+      uni.setStorageSync('last_meal_pref', {
+        food_grams: String(numValue),
+        food_brand: formData.value.food_brand || ''
+      })
+    } catch (e) {}
     
-    await callApi('addRecord', { type: 'meal_records', recordData })
-    
-    uni.showToast({ title: '饮食记录成功', icon: 'success' })
+    if (isEditMode.value && editRecordId.value) {
+      await callApi('updateRecord', {
+        catId,
+        type: 'meal_records',
+        recordId: editRecordId.value,
+        recordData
+      })
+      uni.removeStorageSync('editing_record')
+      uni.showToast({ title: '修改成功', icon: 'success' })
+    } else {
+      await callApi('addRecord', { type: 'meal_records', recordData })
+      uni.showToast({ title: '饮食记录成功', icon: 'success' })
+    }
     setTimeout(() => {
       safeNavigateBack()
     }, 1500)

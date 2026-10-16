@@ -51,7 +51,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { safeNavigateBack } from '@/utils/api'
+import { callCloudFunction, safeNavigateBack } from '@/utils/api'
 
 const isSubmitting = ref(false)
 const selectedTime = ref('')
@@ -94,13 +94,11 @@ const subscribeAndSave = () => {
     return
   }
 
-  // @ts-ignore
   if (typeof wx === 'undefined') {
     uni.showToast({ title: '仅支持在微信小程序中使用', icon: 'none' })
     return
   }
 
-  // @ts-ignore
   wx.requestSubscribeMessage({
     tmplIds: [TEMPLATE_ID],
     success: (res: any) => {
@@ -121,24 +119,20 @@ const saveReminderToCloud = async () => {
   isSubmitting.value = true
   try {
     const catId = uni.getStorageSync('currentCatId') || 'default'
-    // @ts-ignore
-    const res = await wx.cloud.callFunction({
-      name: 'setReminder',
-      data: {
-        catId: catId,
-        triggerTime: selectedDateObj.value!.getTime(),
-        templateId: TEMPLATE_ID,
-        reminderType: reminderType.value
-      }
+    const result = await callCloudFunction('setReminder', {
+      catId: catId,
+      triggerTime: selectedDateObj.value!.getTime(),
+      templateId: TEMPLATE_ID,
+      reminderType: reminderType.value
     })
     
-    if (res.result && res.result.code === 0) {
+    if (result && result.code === 0) {
       uni.showToast({ title: '设置成功', icon: 'success' })
       setTimeout(() => {
         safeNavigateBack('/pages/tools/index')
       }, 1500)
     } else {
-      uni.showToast({ title: res.result?.msg || '设置失败', icon: 'none' })
+      uni.showToast({ title: result?.msg || '设置失败', icon: 'none' })
     }
   } catch (err) {
     console.error(err)

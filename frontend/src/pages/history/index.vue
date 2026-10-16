@@ -9,6 +9,20 @@
       <view class="tab-item" :class="{ active: currentTab === 4 }" @click="switchTab(4)">体重记录</view>
     </view>
 
+    <!-- 日期筛选栏 -->
+    <view class="filter-bar">
+      <picker mode="date" :value="filterDate" @change="onFilterDateChange">
+        <view class="date-filter-btn" :class="{ active: !!filterDate }">
+          <view class="icon-calendar"></view>
+          <text>{{ filterDate ? `筛选：${formatDate(filterDate)} (${filterDate.slice(0, 4)})` : '按日期筛选：全部日期' }}</text>
+          <text class="filter-arrow">▼</text>
+        </view>
+      </picker>
+      <view class="clear-filter-btn" v-if="filterDate" @click="clearDateFilter">
+        <text>查看全部</text>
+      </view>
+    </view>
+
     <!-- 列表区 -->
     <scroll-view class="list-container" scroll-y @scrolltolower="loadMore" refresher-enabled @refresherrefresh="onRefresh" :refresher-triggered="isRefreshing">
       <view class="record-list" v-if="records.length > 0">
@@ -86,6 +100,9 @@
               </template>
             </view>
             <view class="action-wrap">
+              <view class="edit-btn" @click.stop="onEditRecord(item)">
+                <view class="icon-edit"></view> <text>编辑</text>
+              </view>
               <view class="delete-btn" @click.stop="onLongPress(item._id)">
                 <view class="icon-trash"></view> <text>删除</text>
               </view>
@@ -97,7 +114,7 @@
       
       <!-- 空状态 -->
       <view class="empty-state" v-if="records.length === 0 && !isLoading">
-        <text class="empty-text">暂无历史记录</text>
+        <text class="empty-text">{{ filterDate ? '所选日期暂无记录' : '暂无历史记录' }}</text>
       </view>
       
       <!-- 加载中 -->
@@ -113,16 +130,24 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { onLoad, onShow, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
-import { callApi } from '@/utils/api'
+import { onShow, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
+import { callApi, getDataVersion } from '@/utils/api'
+import { useCatSession } from '@/composables/useCatSession'
+import { evaluateGlucoseStatus } from '@/utils/glucoseDomain'
 
 const currentTab = ref(0) // 0: 血糖, 1: 打针, 2: 饮食, 3: 排泄, 4: 体重
+const filterDate = ref('')
 const records = ref<any[]>([])
 const isLoading = ref(false)
 const isRefreshing = ref(false)
 const hasMore = ref(true)
 
 const PAGE_SIZE = 20
+const { currentCatId, currentTargetRange, fetchCats } = useCatSession()
+
+let hasInitialLoaded = false
+let lastLoadedCatId = ''
+let lastLoadedVersion = -1
 
 const getCollectionName = () => {
   if (currentTab.value === 0) return 'blood_glucose'
@@ -132,39 +157,44 @@ const getCollectionName = () => {
   return 'weight_records'
 }
 
-const targetMin = ref(4.0)
-const targetMax = ref(15.0)
-
-const fetchCatTarget = async () => {
-  try {
-    const res = await callApi('getCats')
-    if (res.data && res.data.length > 0) {
-      const currentCatId = uni.getStorageSync('currentCatId')
-      let cat = res.data.find((c: any) => c._id === currentCatId)
-      if (!cat) cat = res.data[0]
-      if (cat) {
-        if (cat.targetMin !== undefined && !isNaN(Number(cat.targetMin))) {
-          targetMin.value = Number(cat.targetMin)
-        }
-        if (cat.targetMax !== undefined && !isNaN(Number(cat.targetMax))) {
-          targetMax.value = Number(cat.targetMax)
-        }
-      }
-    }
-  } catch (e) {
-    console.error('获取猫咪控糖目标失败', e)
-  }
+const getEditPageUrl = () => {
+  if (currentTab.value === 0) return '/pages/log/index'
+  if (currentTab.value === 1) return '/pages/log-insulin/index'
+  if (currentTab.value === 2) return '/pages/log-meal/index'
+  if (currentTab.value === 3) return '/pages/log-excretion/index'
+  return '/pages/log-weight/index'
 }
 
-onLoad(() => {
-  fetchCatTarget()
+const onFilterDateChange = (e: any) => {
+  filterDate.value = e.detail.value
   loadData(true)
-})
+}
 
-onShow(() => {
-  fetchCatTarget()
-  if (records.value.length > 0) {
-    loadData(true)
+const clearDateFilter = () => {
+  if (!filterDate.value) return
+  filterDate.value = ''
+  loadData(true)
+}
+
+const onEditRecord = (item: any) => {
+  if (!item || !item._id) return
+  uni.setStorageSync('editing_record', {
+    ...item,
+    recordType: getCollectionName()
+  })
+  const baseUrl = getEditPageUrl()
+  uni.navigateTo({
+    url: `${baseUrl}?edit=1&id=${item._id}`
+  })
+}
+
+onShow(async () => {
+  await fetchCats()
+  const activeCatId = currentCatId.value || uni.getStorageSync('currentCatId') || 'default'
+  const currentVer = getDataVersion()
+  if (!hasInitialLoaded || activeCatId !== lastLoadedCatId || currentVer !== lastLoadedVersion) {
+    hasInitialLoaded = true
+    await loadData(true)
   }
 })
 
@@ -189,7 +219,7 @@ const switchTab = (index: number) => {
 
 const onRefresh = async () => {
   isRefreshing.value = true
-  await fetchCatTarget()
+  await fetchCats()
   await loadData(true)
   isRefreshing.value = false
 }
@@ -210,12 +240,13 @@ const loadData = async (isReset: boolean) => {
   }
 
   try {
-    const catId = uni.getStorageSync('currentCatId') || 'default'
+    const catId = currentCatId.value || uni.getStorageSync('currentCatId') || 'default'
     const collectionName = getCollectionName()
     
     const res = await callApi('getRecords', {
       catId,
       type: collectionName,
+      recordDate: filterDate.value || undefined,
       limit: PAGE_SIZE,
       skip: records.value.length
     })
@@ -225,6 +256,8 @@ const loadData = async (isReset: boolean) => {
     }
     
     records.value = [...records.value, ...res.data]
+    lastLoadedCatId = catId
+    lastLoadedVersion = getDataVersion()
   } catch (e) {
     console.error('获取记录失败', e)
     uni.showToast({ title: '加载失败', icon: 'none' })
@@ -248,7 +281,7 @@ const onLongPress = (id: string) => {
 const deleteRecord = async (id: string) => {
   uni.showLoading({ title: '删除中' })
   try {
-    const catId = uni.getStorageSync('currentCatId') || 'default'
+    const catId = currentCatId.value || uni.getStorageSync('currentCatId') || 'default'
     const collectionName = getCollectionName()
     
     await callApi('deleteRecord', {
@@ -260,6 +293,7 @@ const deleteRecord = async (id: string) => {
     uni.showToast({ title: '删除成功', icon: 'success' })
     // 从列表中移除
     records.value = records.value.filter(item => item._id !== id)
+    lastLoadedVersion = getDataVersion()
   } catch (err) {
     console.error(err)
     uni.showToast({ title: '删除失败', icon: 'none' })
@@ -288,14 +322,11 @@ const formatDate = (dateVal: any) => {
 }
 
 const getBgColorClass = (value: number) => {
-  const min = targetMin.value
-  const max = targetMax.value
-  const warningMax = max * 1.3 // 动态超标 30% 缓冲阈值
-
-  if (value < min) return 'text-danger' // 红色: 低于自定义目标下限 (低血糖急症)
-  if (value <= max) return 'text-normal' // 绿色: 落在自定义安全目标区间 [targetMin, targetMax] 内
-  if (value <= warningMax) return 'text-warning' // 黄色: 超出目标上限 30% 以内 (轻中度偏高，需观察)
-  return 'text-danger' // 红色: 超出目标上限 30% 以上 (严重高血糖预警)
+  return evaluateGlucoseStatus(
+    Number(value),
+    currentTargetRange.value.min,
+    currentTargetRange.value.max
+  ).historyTextClass
 }
 </script>
 
@@ -335,6 +366,53 @@ const getBgColorClass = (value: number) => {
   height: 6rpx;
   background: var(--primary);
   border-radius: 4rpx;
+}
+.filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20rpx 32rpx;
+  background: #FFFFFF;
+  border-bottom: 2rpx solid #F0F2F5;
+  flex-shrink: 0;
+}
+.date-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 12rpx 24rpx;
+  background: #F8FAFC;
+  border: 2rpx solid #E2E8F0;
+  border-radius: 100rpx;
+  font-size: 24rpx;
+  color: #475569;
+  font-weight: 500;
+}
+.date-filter-btn.active {
+  background: #E8F8F5;
+  border-color: #A3E4D7;
+  color: #16A085;
+  font-weight: 600;
+}
+.icon-calendar {
+  width: 26rpx;
+  height: 26rpx;
+  margin-right: 10rpx;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2316A085' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='18' rx='2' ry='2'/%3E%3Cline x1='16' y1='2' x2='16' y2='6'/%3E%3Cline x1='8' y1='2' x2='8' y2='6'/%3E%3Cline x1='3' y1='10' x2='21' y2='10'/%3E%3C/svg%3E");
+  background-size: contain;
+  background-repeat: no-repeat;
+}
+.filter-arrow {
+  font-size: 20rpx;
+  margin-left: 10rpx;
+  opacity: 0.7;
+}
+.clear-filter-btn {
+  font-size: 24rpx;
+  color: #64748B;
+  padding: 10rpx 20rpx;
+  background: #F1F5F9;
+  border-radius: 100rpx;
+  font-weight: 500;
 }
 .list-container {
   flex: 1;
@@ -448,6 +526,26 @@ const getBgColorClass = (value: number) => {
 }
 .action-wrap {
   margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+.edit-btn {
+  display: flex;
+  align-items: center;
+  font-size: 24rpx;
+  color: #2980B9;
+  background: #EBF5FB;
+  padding: 8rpx 16rpx;
+  border-radius: 8rpx;
+}
+.icon-edit {
+  width: 24rpx;
+  height: 24rpx;
+  margin-right: 6rpx;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232980B9' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 20h9'/%3E%3Cpath d='M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z'/%3E%3C/svg%3E");
+  background-size: contain;
+  background-repeat: no-repeat;
 }
 .delete-btn {
   display: flex;

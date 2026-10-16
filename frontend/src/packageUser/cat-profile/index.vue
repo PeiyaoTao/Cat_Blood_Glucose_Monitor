@@ -52,6 +52,14 @@
           <input type="digit" v-model="formData.targetMax" placeholder="一般为 15.0" />
         </view>
       </view>
+
+      <view class="form-group switch-group">
+        <view class="switch-info">
+          <text class="switch-title">低血糖急救弹窗提醒</text>
+          <text class="switch-desc">录入低血糖时自动弹出急救指引与复测提醒</text>
+        </view>
+        <switch :checked="formData.hypoAlertEnabled" color="#2ECC71" @change="onHypoSwitchChange" />
+      </view>
     </view>
 
     <button class="btn btn-primary submit-btn" :loading="isSubmitting" @click="saveProfile">
@@ -67,44 +75,51 @@
 import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { callApi, safeNavigateBack } from '@/utils/api'
+import { useCatSession } from '@/composables/useCatSession'
+import { DEFAULT_TARGET_MIN, DEFAULT_TARGET_MAX, normalizeTargetRange, getHypoAlertSetting, setHypoAlertSetting } from '@/utils/glucoseDomain'
 
 const isSubmitting = ref(false)
 const docId = ref('')
 const isCreator = ref(true)
 const catOpenId = ref('')
+const { fetchCats, isCatCreator, selectCat } = useCatSession()
 
 const formData = ref({
   avatar: '',
   name: '',
   birthday: '',
   diagnosis_date: '',
-  targetMin: 5.0,
-  targetMax: 15.0
+  targetMin: DEFAULT_TARGET_MIN,
+  targetMax: DEFAULT_TARGET_MAX,
+  hypoAlertEnabled: getHypoAlertSetting()
 })
+
+const onHypoSwitchChange = (e: any) => {
+  formData.value.hypoAlertEnabled = Boolean(e.detail.value)
+  setHypoAlertSetting(formData.value.hypoAlertEnabled)
+}
 
 onLoad(async (options: any) => {
   if (options && options.id) {
     try {
-      const res = await callApi('getCats')
-      if (res.data) {
-        const cat = res.data.find((c: any) => c._id === options.id)
-        if (cat) {
-          docId.value = cat._id
-          catOpenId.value = cat._openid || ''
-          
-          const userInfoStr = uni.getStorageSync('userInfo')
-          const userInfo = userInfoStr ? JSON.parse(userInfoStr) : null
-          const myOpenid = userInfo ? userInfo.openid : ''
-          isCreator.value = !cat._openid || cat._openid === myOpenid
+      const cats = await fetchCats()
+      const cat = cats.find((c: any) => c._id === options.id)
+      if (cat) {
+        docId.value = cat._id
+        catOpenId.value = cat._openid || ''
+        isCreator.value = isCatCreator(cat)
 
-          formData.value = {
-            avatar: cat.avatar || '',
-            name: cat.name || '',
-            birthday: cat.birthday || '',
-            diagnosis_date: cat.diagnosis_date || '',
-            targetMin: cat.targetMin || 5.0,
-            targetMax: cat.targetMax || 15.0
-          }
+        const { min: targetMin, max: targetMax } = normalizeTargetRange(cat.targetMin, cat.targetMax)
+        const hypoEnabled = typeof cat.hypoAlertEnabled === 'boolean' ? cat.hypoAlertEnabled : getHypoAlertSetting(cat)
+        setHypoAlertSetting(hypoEnabled)
+        formData.value = {
+          avatar: cat.avatar || '',
+          name: cat.name || '',
+          birthday: cat.birthday || '',
+          diagnosis_date: cat.diagnosis_date || '',
+          targetMin,
+          targetMax,
+          hypoAlertEnabled: hypoEnabled
         }
       }
     } catch (e) {
@@ -122,9 +137,7 @@ const onBirthdayChange = (e: any) => {
 }
 
 const handleAvatarClick = () => {
-  // @ts-ignore
   if (typeof wx === 'undefined') return // 非微信环境的回退
-  // @ts-ignore
   wx.chooseMedia({
     count: 1,
     mediaType: ['image'],
@@ -143,7 +156,6 @@ const onChooseAvatar = (e: any) => {
 const uploadAvatar = async (filePath: string) => {
   uni.showLoading({ title: '正在上传头像...' })
   try {
-    // @ts-ignore
     const uploadRes = await wx.cloud.uploadFile({
       cloudPath: `avatars/cat_${Date.now()}_${Math.floor(Math.random() * 1000)}.jpg`,
       filePath: filePath,
@@ -158,27 +170,44 @@ const uploadAvatar = async (filePath: string) => {
 }
 
 const saveProfile = async () => {
-  if (!formData.value.name) {
+  if (!formData.value.name || !formData.value.name.trim()) {
     uni.showToast({ title: '请输入猫咪名字', icon: 'none' })
+    return
+  }
+
+  const minVal = parseFloat(String(formData.value.targetMin))
+  const maxVal = parseFloat(String(formData.value.targetMax))
+  if (!Number.isFinite(minVal) || minVal <= 0 || minVal >= 50) {
+    uni.showToast({ title: '请输入有效的血糖目标下限 (0 ~ 50)', icon: 'none' })
+    return
+  }
+  if (!Number.isFinite(maxVal) || maxVal <= 0 || maxVal > 60) {
+    uni.showToast({ title: '请输入有效的血糖目标上限 (0 ~ 60)', icon: 'none' })
+    return
+  }
+  if (minVal >= maxVal) {
+    uni.showToast({ title: '血糖目标下限必须小于目标上限', icon: 'none' })
     return
   }
   
   isSubmitting.value = true
   try {
+    setHypoAlertSetting(formData.value.hypoAlertEnabled)
     const dataToSave = {
       avatar: formData.value.avatar,
-      name: formData.value.name,
+      name: formData.value.name.trim(),
       birthday: formData.value.birthday,
       diagnosis_date: formData.value.diagnosis_date,
-      targetMin: parseFloat(formData.value.targetMin as any),
-      targetMax: parseFloat(formData.value.targetMax as any),
+      targetMin: Number(minVal.toFixed(1)),
+      targetMax: Number(maxVal.toFixed(1)),
+      hypoAlertEnabled: Boolean(formData.value.hypoAlertEnabled),
       updateTime: Date.now()
     }
     
     const res = await callApi('saveCat', { catId: docId.value, catData: dataToSave })
-    if (!docId.value) {
+    if (!docId.value && res.id) {
       docId.value = res.id
-      uni.setStorageSync('currentCatId', res.id)
+      selectCat(res.id)
     }
     
     uni.showToast({ title: '保存成功', icon: 'success' })
@@ -192,7 +221,7 @@ const saveProfile = async () => {
     } else if (errorStr.includes('not exist')) {
       uni.showToast({ title: '请先在云开发控制台创建集合！', icon: 'none', duration: 4000 })
     } else {
-      uni.showToast({ title: '保存失败', icon: 'none' })
+      uni.showToast({ title: errorStr || '保存失败', icon: 'none' })
     }
   } finally {
     isSubmitting.value = false
@@ -340,5 +369,29 @@ const handleDelete = () => {
   background-color: transparent;
   color: var(--danger-red);
   border: 2rpx solid var(--danger-red);
+}
+.switch-group {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 16rpx;
+  border-top: 2rpx solid #F1F5F9;
+  margin-bottom: 0;
+}
+.switch-info {
+  flex: 1;
+  padding-right: 24rpx;
+}
+.switch-title {
+  display: block;
+  font-size: 30rpx;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: 6rpx;
+}
+.switch-desc {
+  display: block;
+  font-size: 24rpx;
+  color: var(--text-sub);
 }
 </style>

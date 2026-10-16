@@ -60,7 +60,7 @@
 import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { getFeederConfig, fetchFeederConfigFromCloud, isFeederConfigValid, type AutoFeederConfig } from '@/utils/feederSync'
-import { callApi } from '@/utils/api'
+import { callApi, callCloudFunction } from '@/utils/api'
 
 const feederStatusDesc = ref('适配喂食机定时出餐')
 const isFeederRunning = ref(false)
@@ -127,38 +127,30 @@ const handleToolClick = (toolName: string) => {
 }
 
 const exportExcel = async (days: number) => {
-  // @ts-ignore
   if (typeof wx === 'undefined' || !wx.cloud) return
   
   uni.showLoading({ title: '正在生成表格...', mask: true })
   
   try {
     const catId = uni.getStorageSync('currentCatId') || 'default'
-    const res = await wx.cloud.callFunction({
-      name: 'exportExcel',
-      data: { days, catId }
-    })
+    const result = await callCloudFunction('exportExcel', { days, catId })
     
-    if (res.result && res.result.code === 0 && res.result.fileID) {
+    if (result && result.code === 0 && result.fileID) {
       uni.showLoading({ title: '正在下载文件...' })
-      // @ts-ignore
       wx.cloud.downloadFile({
-        fileID: res.result.fileID,
+        fileID: result.fileID,
         success: (downloadRes: any) => {
           uni.hideLoading()
           // 已下载到本地，清理云端临时报告文件，避免云存储无限增长
-          callApi('deleteReportFile', { fileID: res.result.fileID }).catch(() => {})
-          const customFileName = res.result.fileName || '血糖报告.xlsx'
-          // @ts-ignore
+          callApi('deleteReportFile', { fileID: result.fileID }).catch(() => {})
+          const customFileName = result.fileName || '血糖报告.xlsx'
           const fs = wx.getFileSystemManager()
-          // @ts-ignore
           const targetPath = `${wx.env.USER_DATA_PATH}/${customFileName}`
 
           fs.copyFile({
             srcPath: downloadRes.tempFilePath,
             destPath: targetPath,
             success: () => {
-              // @ts-ignore
               wx.openDocument({
                 filePath: targetPath,
                 fileType: 'xlsx',
@@ -168,7 +160,6 @@ const exportExcel = async (days: number) => {
                 },
                 fail: function (openErr: any) {
                   console.error('打开重命名文件失败，回退打开临时文件', openErr)
-                  // @ts-ignore
                   wx.openDocument({
                     filePath: downloadRes.tempFilePath,
                     fileType: 'xlsx',
@@ -179,7 +170,6 @@ const exportExcel = async (days: number) => {
             },
             fail: (copyErr: any) => {
               console.error('复制重命名文件失败，使用原路径打开', copyErr)
-              // @ts-ignore
               wx.openDocument({
                 filePath: downloadRes.tempFilePath,
                 fileType: 'xlsx',
@@ -196,8 +186,8 @@ const exportExcel = async (days: number) => {
       })
     } else {
       uni.hideLoading()
-      uni.showToast({ title: res.result?.msg || '生成失败，请检查云函数部署', icon: 'none' })
-      console.error(res.result)
+      uni.showToast({ title: result?.msg || '生成失败，请检查云函数部署', icon: 'none' })
+      console.error(result)
     }
   } catch (err) {
     uni.hideLoading()

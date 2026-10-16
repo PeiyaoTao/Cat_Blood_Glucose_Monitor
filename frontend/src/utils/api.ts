@@ -12,6 +12,7 @@ export type ApiAction =
   | 'syncAutoFeeder'
   | 'getRecords'
   | 'addRecord'
+  | 'updateRecord'
   | 'deleteRecord'
   | 'recognizeNutrition'
   | 'deleteReportFile'
@@ -36,18 +37,25 @@ export interface ApiResult {
 const MUTATING_ACTIONS: ApiAction[] = [
   'acceptInvite',
   'unbindSharedCat',
+  'removeFamilyMember',
   'saveCat',
   'deleteCat',
+  'saveFeederConfig',
   'addRecord',
+  'updateRecord',
   'deleteRecord'
 ]
 
 let dataDirty = true
+let dataVersion = 1
 
 // 手动标记数据已变更（例如通过其他云函数导入了数据）
 export const markDataDirty = () => {
   dataDirty = true
+  dataVersion++
 }
+
+export const getDataVersion = (): number => dataVersion
 
 // 读取并清除变更标记
 export const consumeDataDirty = (): boolean => {
@@ -57,14 +65,12 @@ export const consumeDataDirty = (): boolean => {
 }
 
 export const callApi = async (action: ApiAction, payload: Record<string, any> = {}): Promise<ApiResult> => {
-  // @ts-ignore
   if (typeof wx === 'undefined' || !wx.cloud) {
     console.error('wx.cloud is not available')
     throw new Error('wx.cloud is not available')
   }
   
   try {
-    // @ts-ignore
     const res = await wx.cloud.callFunction({
       name: 'api',
       data: {
@@ -74,8 +80,11 @@ export const callApi = async (action: ApiAction, payload: Record<string, any> = 
     })
     
     if (res.result && res.result.success) {
-      if (MUTATING_ACTIONS.includes(action)) {
-        dataDirty = true
+      if (
+        MUTATING_ACTIONS.includes(action) ||
+        (action === 'syncAutoFeeder' && Number(res.result.syncedCount) > 0)
+      ) {
+        markDataDirty()
       }
       return res.result
     } else {
@@ -86,6 +95,20 @@ export const callApi = async (action: ApiAction, payload: Record<string, any> = 
     console.error(`Cloud function call failed (${action}):`, err)
     throw err
   }
+}
+
+/**
+ * 调用独立云函数（exportExcel / importExcel / setReminder / login）的统一网关封装
+ */
+export const callCloudFunction = async <T = any>(
+  name: 'exportExcel' | 'importExcel' | 'setReminder' | 'login',
+  data: Record<string, any> = {}
+): Promise<T> => {
+  if (typeof wx === 'undefined' || !wx.cloud) {
+    throw new Error('wx.cloud is not available')
+  }
+  const res = await wx.cloud.callFunction({ name, data })
+  return (res?.result ?? {}) as T
 }
 
 // 格式化本地日期 YYYY-MM-DD

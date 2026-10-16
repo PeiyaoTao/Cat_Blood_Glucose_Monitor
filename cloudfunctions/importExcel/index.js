@@ -168,6 +168,10 @@ const sanitizeImportItems = (items, collectionName, catId, openid) => {
       fields.forEach(k => {
         if (item[k] !== undefined) doc[k] = item[k]
       })
+      if (collectionName === 'blood_glucose') doc.bg_value = Number(doc.bg_value)
+      if (collectionName === 'insulin_records') doc.dose = Number(doc.dose)
+      if (collectionName === 'meal_records') doc.food_grams = Number(doc.food_grams) || 0
+      if (collectionName === 'weight_records') doc.weight_value = Number(doc.weight_value)
       if (typeof doc.createTime !== 'number' || isNaN(doc.createTime)) {
         doc.createTime = makeTimestamp(doc.record_date, doc.measure_time || doc.inject_time || doc.meal_time || doc.record_time)
       }
@@ -176,6 +180,12 @@ const sanitizeImportItems = (items, collectionName, catId, openid) => {
       doc.created_by = openid
       doc.source = 'excel_import'
       return doc
+    })
+    .filter(doc => {
+      if (collectionName === 'blood_glucose') return !isNaN(doc.bg_value) && doc.bg_value > 0 && doc.bg_value <= 100
+      if (collectionName === 'insulin_records') return !isNaN(doc.dose) && doc.dose > 0 && doc.dose <= 50
+      if (collectionName === 'weight_records') return !isNaN(doc.weight_value) && doc.weight_value > 0 && doc.weight_value <= 50
+      return true
     })
 }
 
@@ -260,13 +270,20 @@ exports.main = async (event, context) => {
     // ACTION 1: 解析文件 (PARSE)
     // -------------------------------------------------------------
     if (action === 'parse') {
-      if (!fileID) {
-        return { code: -1, msg: '未提供文件 fileID' }
+      if (!fileID || typeof fileID !== 'string' || !fileID.startsWith('cloud://') || !fileID.includes('/temp_imports/')) {
+        return { code: -1, msg: '未提供有效的临时导入文件 fileID' }
       }
 
-      // 1. 从云存储下载文件 Buffer
-      const downloadRes = await cloud.downloadFile({ fileID })
-      const buffer = downloadRes.fileContent
+      // 1. 从云存储下载文件 Buffer，下载后立即在 finally 中清理云端临时文件，彻底杜绝取消或重选导致孤儿文件残留
+      let buffer = null
+      try {
+        const downloadRes = await cloud.downloadFile({ fileID })
+        buffer = downloadRes.fileContent
+      } finally {
+        await cloud.deleteFile({ fileList: [fileID] }).catch(e => {
+          console.log('Clean temp import file warning:', e.message)
+        })
+      }
 
       const workbook = new ExcelJS.Workbook()
       await workbook.xlsx.load(buffer)
@@ -606,8 +623,8 @@ exports.main = async (event, context) => {
       await batchInsert('excretion_records', excretions, 'excretion', doc => `${getDedupeDate(doc)}_${getDedupeTime(doc)}_${doc.urine || ''}`)
       await batchInsert('weight_records', weights, 'weight', doc => `${getDedupeDate(doc)}_${parseFloat(doc.weight_value || 0).toFixed(2)}`)
 
-      // 清理临时上传的 Excel 文件
-      if (fileID) {
+      // 清理临时上传的 Excel 文件（正常情况下已在 parse 阶段清理，此处做幂等兜底）
+      if (fileID && typeof fileID === 'string' && fileID.startsWith('cloud://') && fileID.includes('/temp_imports/')) {
         try {
           await cloud.deleteFile({ fileList: [fileID] })
         } catch (e) {

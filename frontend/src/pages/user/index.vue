@@ -31,6 +31,14 @@
         <text class="menu-text">家庭成员共享</text>
         <text class="arrow">›</text>
       </view>
+      <view class="menu-item">
+        <view class="icon-svg icon-shield"></view>
+        <view class="menu-switch-content">
+          <text class="menu-text">低血糖急救弹窗提醒</text>
+          <text class="menu-sub-desc">测出低血糖时弹出急救步骤与复测提醒</text>
+        </view>
+        <switch :checked="hypoAlertEnabled" color="#2ECC71" @change="onToggleHypoAlert" />
+      </view>
       <view class="menu-item" @click="handleMenuClick('使用帮助')">
         <view class="icon-svg icon-book"></view>
         <text class="menu-text">使用帮助与医学免责</text>
@@ -47,8 +55,38 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { onLoad, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
-import { callApi } from '@/utils/api'
+import { onLoad, onShow, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
+import { callApi, callCloudFunction } from '@/utils/api'
+import { useCatSession } from '@/composables/useCatSession'
+import { getHypoAlertSetting, setHypoAlertSetting } from '@/utils/glucoseDomain'
+
+const { currentCat, fetchCats, syncOpenidToStorage } = useCatSession()
+
+const hypoAlertEnabled = ref(getHypoAlertSetting())
+
+onShow(() => {
+  hypoAlertEnabled.value = getHypoAlertSetting(currentCat.value)
+})
+
+const onToggleHypoAlert = async (e: any) => {
+  const enabled = Boolean(e.detail.value)
+  hypoAlertEnabled.value = enabled
+  setHypoAlertSetting(enabled)
+  if (currentCat.value && currentCat.value._id) {
+    try {
+      await callApi('saveCat', {
+        catId: currentCat.value._id,
+        catData: { hypoAlertEnabled: enabled }
+      })
+    } catch (err) {
+      // 本地设置已生效
+    }
+  }
+  uni.showToast({
+    title: enabled ? '已开启低血糖急救提醒' : '已关闭低血糖急救提醒',
+    icon: 'none'
+  })
+}
 
 const userInfo = ref({
   avatarUrl: '',
@@ -66,6 +104,9 @@ onLoad(async () => {
     if (res && res.userInfo) {
       userInfo.value = res.userInfo
       uni.setStorageSync('userInfo', JSON.stringify(userInfo.value))
+      if (userInfo.value.openid) {
+        syncOpenidToStorage(userInfo.value.openid)
+      }
       lastSavedNickName = userInfo.value.nickName
       lastSavedAvatarUrl = userInfo.value.avatarUrl
     }
@@ -86,13 +127,12 @@ onLoad(async () => {
 })
 
 const login = async () => {
-  // @ts-ignore
   if (typeof wx !== 'undefined' && wx.cloud) {
     try {
-      // @ts-ignore
-      const res = await wx.cloud.callFunction({ name: 'login' })
-      if (res.result && res.result.openid) {
-        userInfo.value.openid = res.result.openid
+      const result = await callCloudFunction('login')
+      if (result && result.openid) {
+        userInfo.value.openid = result.openid
+        syncOpenidToStorage(result.openid)
         // 不在这里调用 saveUserInfo，防止在未拉取到云端数据时，用默认头像昵称覆盖云端
         uni.setStorageSync('userInfo', JSON.stringify(userInfo.value))
       } else {
@@ -112,13 +152,11 @@ const onChooseAvatar = async (e: any) => {
   // 先在本地显示
   userInfo.value.avatarUrl = tempPath
   
-  // @ts-ignore
   if (typeof wx !== 'undefined' && wx.cloud && userInfo.value.openid) {
     uni.showLoading({ title: '上传头像中...' })
     try {
       const ext = tempPath.match(/\.([^\.]+)$/)?.[1] || 'png'
       const cloudPath = `avatars/${userInfo.value.openid}_${Date.now()}.${ext}`
-      // @ts-ignore
       const uploadRes = await wx.cloud.uploadFile({
         cloudPath: cloudPath,
         filePath: tempPath
@@ -217,10 +255,10 @@ const handleMenuClick = async (menuName: string) => {
   if (menuName === '猫咪档案') {
     uni.showLoading({ title: '加载中...' })
     try {
-      const res = await callApi('getCats')
+      const cats = await fetchCats()
       uni.hideLoading()
       
-      const itemList = res.data.map((c: any) => '编辑：' + (c.name || '未命名'))
+      const itemList = cats.map((c: any) => '编辑：' + (c.name || '未命名'))
       itemList.push('➕ 新增猫咪')
       
       uni.showActionSheet({
@@ -229,7 +267,7 @@ const handleMenuClick = async (menuName: string) => {
           if (actionRes.tapIndex === itemList.length - 1) {
             uni.navigateTo({ url: '/packageUser/cat-profile/index' })
           } else {
-            const selectedCat = res.data[actionRes.tapIndex]
+            const selectedCat = cats[actionRes.tapIndex]
             uni.navigateTo({ url: `/packageUser/cat-profile/index?id=${selectedCat._id}` })
           }
         }
@@ -362,5 +400,17 @@ const handleMenuClick = async (menuName: string) => {
 .icon-history { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F1C40F' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 3v18h18'/%3E%3Cpath d='m19 9-5 5-4-4-3 3'/%3E%3C/svg%3E"); }
 .icon-family { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233498DB' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2'/%3E%3Ccircle cx='9' cy='7' r='4'/%3E%3Cpath d='M22 21v-2a4 4 0 0 0-3-3.87'/%3E%3Cpath d='M16 3.13a4 4 0 0 1 0 7.75'/%3E%3C/svg%3E"); }
 .icon-book { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232ECC71' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20'/%3E%3C/svg%3E"); }
+.menu-switch-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding-right: 16rpx;
+}
+.menu-sub-desc {
+  font-size: 22rpx;
+  color: var(--text-sub);
+  margin-top: 4rpx;
+}
+.icon-shield { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23E74C3C' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'/%3E%3Cline x1='12' y1='8' x2='12' y2='12'/%3E%3Cline x1='12' y1='16' x2='12.01' y2='16'/%3E%3C/svg%3E"); }
 .icon-info { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239B59B6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 16v-4'/%3E%3Cpath d='M12 8h.01'/%3E%3C/svg%3E"); }
 </style>

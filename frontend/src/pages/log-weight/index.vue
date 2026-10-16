@@ -2,7 +2,7 @@
   <view class="container">
     <view class="header">
       <view class="icon-svg icon-weight"></view>
-      <text class="title">记录体重</text>
+      <text class="title">{{ isEditMode ? '编辑体重' : '记录体重' }}</text>
     </view>
 
     <view class="form-card">
@@ -41,7 +41,7 @@
       </view>
 
       <button class="btn btn-primary submit-btn" :loading="isSubmitting" @click="submitLog">
-        保存记录
+        {{ isEditMode ? '保存修改' : '保存记录' }}
       </button>
     </view>
   </view>
@@ -49,13 +49,30 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
 import { callApi, getLocalTodayDate, getLocalCurrentTime, makeLocalTimestamp, safeNavigateBack } from '@/utils/api'
 
+const isEditMode = ref(false)
+const editRecordId = ref('')
 const weightValue = ref('')
 const isSubmitting = ref(false)
 
 const recordDate = ref(getLocalTodayDate())
 const recordTime = ref(getLocalCurrentTime())
+
+onLoad((options: any) => {
+  if (options && options.edit === '1' && options.id) {
+    const cached = uni.getStorageSync('editing_record')
+    if (cached && cached._id === options.id) {
+      isEditMode.value = true
+      editRecordId.value = cached._id
+      uni.setNavigationBarTitle({ title: '编辑体重记录' })
+      weightValue.value = cached.weight_value !== undefined ? String(cached.weight_value) : ''
+      recordDate.value = cached.record_date || getLocalTodayDate()
+      recordTime.value = cached.measure_time || getLocalCurrentTime()
+    }
+  }
+})
 
 const onDateChange = (e: any) => {
   recordDate.value = e.detail.value
@@ -73,18 +90,29 @@ const submitLog = async () => {
 
   isSubmitting.value = true
   try {
+    const catId = uni.getStorageSync('currentCatId') || 'default'
     const recordDateTime = makeLocalTimestamp(recordDate.value, recordTime.value)
     const recordData = {
-      cat_id: uni.getStorageSync('currentCatId') || 'default',
+      cat_id: catId,
       weight_value: parseFloat(weightValue.value),
       record_date: recordDate.value,
       measure_time: recordTime.value,
       createTime: recordDateTime
     }
     
-    await callApi('addRecord', { type: 'weight_records', recordData })
-    
-    uni.showToast({ title: '记录成功', icon: 'success' })
+    if (isEditMode.value && editRecordId.value) {
+      await callApi('updateRecord', {
+        catId,
+        type: 'weight_records',
+        recordId: editRecordId.value,
+        recordData
+      })
+      uni.removeStorageSync('editing_record')
+      uni.showToast({ title: '修改成功', icon: 'success' })
+    } else {
+      await callApi('addRecord', { type: 'weight_records', recordData })
+      uni.showToast({ title: '记录成功', icon: 'success' })
+    }
     setTimeout(() => {
       safeNavigateBack()
     }, 1500)

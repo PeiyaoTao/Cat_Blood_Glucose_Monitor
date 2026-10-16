@@ -273,8 +273,8 @@ exports.main = async (event, context) => {
     let currentRowNumber = 3 // 数据从第 3 行开始
 
     if (sortedDates.length === 0) {
-      // 默认空状态示例 4 行
-      const todayStr = new Date().toISOString().split('T')[0]
+      // 默认空状态示例 4 行（按北京时间 UTC+8 生成今日日期）
+      const todayStr = extractRecordDate({ createTime: Date.now() })
       const emptyRow1 = worksheet.addRow([todayStr, '早针', '', null, null, '', '', null, '', '', '', '暂无历史记录'])
       const emptyRow2 = worksheet.addRow(['', '针后5小时', '', null, null, '', '', null, '', '', '', ''])
       const emptyRow3 = worksheet.addRow(['', '晚针', '', null, null, '', '', null, '', '', '', ''])

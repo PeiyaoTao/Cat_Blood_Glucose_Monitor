@@ -101,14 +101,19 @@
     </view>
 
     <button class="btn btn-primary submit-btn" :loading="isSubmitting" @click="submitRecord">
-      保存打针记录
+      {{ isEditMode ? '保存修改' : '保存打针记录' }}
     </button>
   </view>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
 import { callApi, getLocalTodayDate, getLocalCurrentTime, makeLocalTimestamp, safeNavigateBack } from '@/utils/api'
+import { useCustomPresets } from '@/composables/useCustomPresets'
+
+const isEditMode = ref(false)
+const editRecordId = ref('')
 
 const periodOptions = ['早针', '晚针', '临时加针']
 const periodIndex = ref(0)
@@ -125,30 +130,28 @@ const adjustOptions = [
 const adjustIndex = ref(0)
 
 const defaultInsulins = ['甘精胰岛素 (Glargine)', '地特胰岛素 (Detemir)', '中效胰岛素 (NPH)']
-const customInsulinList = ref<string[]>([])
+const {
+  customList: customInsulinList,
+  allOptions: insulinOptions,
+  isCustom: isCustomTag,
+  addCustom: addCustomInsulin,
+  confirmRemoveCustom: confirmRemoveInsulin
+} = useCustomPresets({
+  storageKey: 'custom_insulin_types',
+  defaultItems: defaultInsulins,
+  appendOtherOption: true,
+  deleteModalTitle: '删除快捷选项',
+  savedToastText: '已保存为快捷选项',
+  duplicateToastText: '该选项已存在',
+  deletedToastText: '已删除常用选项'
+})
+
 const insulinIndex = ref(0)
 const customInsulinText = ref('')
-
-const loadSavedInsulins = () => {
-  const saved = uni.getStorageSync('custom_insulin_types')
-  if (saved && Array.isArray(saved)) {
-    customInsulinList.value = saved
-  }
-}
-
-onMounted(() => {
-  loadSavedInsulins()
-})
-
-const insulinOptions = computed(() => {
-  return [...defaultInsulins, ...customInsulinList.value, '其他']
-})
 
 const isCustomInsulin = computed(() => {
   return insulinOptions.value[insulinIndex.value] === '其他'
 })
-
-const isCustomTag = (opt: string) => customInsulinList.value.includes(opt)
 
 const selectInsulinByIndex = (idx: number) => {
   insulinIndex.value = idx
@@ -157,38 +160,19 @@ const selectInsulinByIndex = (idx: number) => {
 const saveCustomInsulin = () => {
   const text = customInsulinText.value.trim()
   if (!text) return
-  if (!customInsulinList.value.includes(text) && !defaultInsulins.includes(text)) {
-    const updated = [...customInsulinList.value, text]
-    customInsulinList.value = updated
-    uni.setStorageSync('custom_insulin_types', updated)
-    uni.showToast({ title: '已保存为快捷选项', icon: 'success' })
+  if (addCustomInsulin(text)) {
     setTimeout(() => {
       const newIdx = insulinOptions.value.findIndex(item => item === text)
       if (newIdx !== -1) {
         insulinIndex.value = newIdx
       }
     }, 100)
-  } else {
-    uni.showToast({ title: '该选项已存在', icon: 'none' })
   }
 }
 
 const onLongPressInsulin = (opt: string) => {
-  if (!customInsulinList.value.includes(opt)) return
-  uni.showModal({
-    title: '删除快捷选项',
-    content: `确定要删除自定义常用选项「${opt}」吗？`,
-    confirmText: '删除',
-    confirmColor: '#E74C3C',
-    success: (res) => {
-      if (res.confirm) {
-        const updated = customInsulinList.value.filter(item => item !== opt)
-        customInsulinList.value = updated
-        uni.setStorageSync('custom_insulin_types', updated)
-        insulinIndex.value = 0
-        uni.showToast({ title: '已删除常用选项', icon: 'success' })
-      }
-    }
+  confirmRemoveInsulin(opt, () => {
+    insulinIndex.value = 0
   })
 }
 
@@ -210,6 +194,42 @@ const formData = ref({
   date: currentDate,
   time: currentTime,
   note: ''
+})
+
+onLoad((options: any) => {
+  if (options && options.edit === '1' && options.id) {
+    const cached = uni.getStorageSync('editing_record')
+    if (cached && cached._id === options.id) {
+      isEditMode.value = true
+      editRecordId.value = cached._id
+      uni.setNavigationBarTitle({ title: '编辑打针记录' })
+      formData.value.dose = cached.dose !== undefined ? String(cached.dose) : ''
+      formData.value.date = cached.record_date || currentDate
+      formData.value.time = cached.inject_time || currentTime
+      formData.value.note = cached.note || ''
+
+      if (cached.period) {
+        const pIdx = periodOptions.indexOf(cached.period)
+        if (pIdx !== -1) periodIndex.value = pIdx
+      }
+      if (cached.dose_adjustment) {
+        const aIdx = adjustOptions.indexOf(cached.dose_adjustment)
+        if (aIdx !== -1) adjustIndex.value = aIdx
+      }
+      if (cached.insulin_type) {
+        const iIdx = insulinOptions.value.indexOf(cached.insulin_type)
+        if (iIdx !== -1) {
+          insulinIndex.value = iIdx
+        } else {
+          const otherIdx = insulinOptions.value.indexOf('其他')
+          if (otherIdx !== -1) {
+            insulinIndex.value = otherIdx
+            customInsulinText.value = cached.insulin_type
+          }
+        }
+      }
+    }
+  }
 })
 
 const onPeriodChange = (e: any) => {
@@ -252,8 +272,9 @@ const submitRecord = async () => {
       finalInsulinType = customInsulinText.value.trim() || '其他'
     }
 
+    const catId = uni.getStorageSync('currentCatId') || 'default'
     const recordData = {
-      cat_id: uni.getStorageSync('currentCatId') || 'default',
+      cat_id: catId,
       dose: numValue,
       period: periodName,
       dose_adjustment: doseAdj,
@@ -264,9 +285,27 @@ const submitRecord = async () => {
       createTime: recordDateTime
     }
     
-    await callApi('addRecord', { type: 'insulin_records', recordData })
-    
-    uni.showToast({ title: '打针记录成功', icon: 'success' })
+    // 记忆最近一次使用的胰岛素剂量与类型，方便在记血糖页同步打卡时一键回填
+    try {
+      uni.setStorageSync('last_insulin_pref', {
+        dose: String(numValue),
+        insulin_type: finalInsulinType
+      })
+    } catch (e) {}
+
+    if (isEditMode.value && editRecordId.value) {
+      await callApi('updateRecord', {
+        catId,
+        type: 'insulin_records',
+        recordId: editRecordId.value,
+        recordData
+      })
+      uni.removeStorageSync('editing_record')
+      uni.showToast({ title: '修改成功', icon: 'success' })
+    } else {
+      await callApi('addRecord', { type: 'insulin_records', recordData })
+      uni.showToast({ title: '打针记录成功', icon: 'success' })
+    }
     setTimeout(() => {
       safeNavigateBack()
     }, 1500)

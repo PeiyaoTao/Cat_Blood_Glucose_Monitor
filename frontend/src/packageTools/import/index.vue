@@ -210,7 +210,8 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { callApi, markDataDirty } from '@/utils/api'
+import { callCloudFunction, markDataDirty } from '@/utils/api'
+import { useCatSession } from '@/composables/useCatSession'
 
 const isAnalyzing = ref(false)
 const isImporting = ref(false)
@@ -219,18 +220,13 @@ const uploadedFileID = ref('')
 const skipDuplicates = ref(true)
 const parseResult = ref<any>(null)
 const importSuccessResult = ref<any>(null)
-const currentCatName = ref('当前猫咪')
-const currentCatId = ref('')
+
+const { currentCatId, currentCat, fetchCats } = useCatSession()
+const currentCatName = computed(() => currentCat.value?.name || '当前猫咪')
 
 onMounted(async () => {
   try {
-    const res = await callApi('getCats')
-    if (res.data && res.data.length > 0) {
-      const storedId = uni.getStorageSync('currentCatId')
-      const targetCat = res.data.find((c: any) => c._id === storedId) || res.data[0]
-      currentCatId.value = targetCat._id
-      currentCatName.value = targetCat.name || '猫咪'
-    }
+    await fetchCats()
   } catch (e) {
     console.log('fetch cat in import page warning', e)
   }
@@ -244,7 +240,6 @@ const totalRecordsToImport = computed(() => {
 
 // 执行原生微信文件选择
 const executeChooseFile = () => {
-  // @ts-ignore
   wx.chooseMessageFile({
     count: 1,
     type: 'file',
@@ -253,7 +248,7 @@ const executeChooseFile = () => {
       if (res.tempFiles && res.tempFiles.length > 0) {
         const file = res.tempFiles[0]
         selectedFileName.value = file.name
-        uploadAndParse(file.path, file.name)
+        uploadAndParse(file.path)
       }
     },
     fail: (err: any) => {
@@ -275,15 +270,13 @@ const executeChooseFile = () => {
 
 // 从微信会话或本地选取文件
 const chooseExcelFile = () => {
-  // @ts-ignore
   if (typeof wx === 'undefined' || !wx.chooseMessageFile) {
     uni.showToast({ title: '请在微信小程序客户端中使用', icon: 'none' })
     return
   }
 
-  // @ts-ignore 兼容隐私授权协议流程
+  // 兼容隐私授权协议流程
   if (wx.requirePrivacyAuthorize) {
-    // @ts-ignore
     wx.requirePrivacyAuthorize({
       success: () => {
         executeChooseFile()
@@ -298,13 +291,12 @@ const chooseExcelFile = () => {
 }
 
 // 上传到云存储并调用云函数进行智能解析
-const uploadAndParse = async (filePath: string, fileName: string) => {
+const uploadAndParse = async (filePath: string) => {
   isAnalyzing.value = true
   uni.showLoading({ title: '正在上传与智能解析...', mask: true })
 
   try {
     const catId = currentCatId.value || uni.getStorageSync('currentCatId') || 'default'
-    // @ts-ignore
     const uploadRes = await wx.cloud.uploadFile({
       cloudPath: `temp_imports/${Date.now()}_${Math.floor(Math.random() * 1000)}.xlsx`,
       filePath: filePath
@@ -312,25 +304,21 @@ const uploadAndParse = async (filePath: string, fileName: string) => {
 
     uploadedFileID.value = uploadRes.fileID
 
-    // @ts-ignore
-    const parseRes = await wx.cloud.callFunction({
-      name: 'importExcel',
-      data: {
-        action: 'parse',
-        fileID: uploadRes.fileID,
-        catId: catId
-      }
+    const parseData = await callCloudFunction('importExcel', {
+      action: 'parse',
+      fileID: uploadRes.fileID,
+      catId: catId
     })
 
     uni.hideLoading()
 
-    if (parseRes.result && parseRes.result.code === 0) {
-      parseResult.value = parseRes.result
+    if (parseData && parseData.code === 0) {
+      parseResult.value = parseData
       uni.showToast({ title: '解析成功', icon: 'success' })
     } else {
       uni.showModal({
         title: '解析提示',
-        content: parseRes.result?.msg || '未能成功解析该 Excel 文件，请检查表头或内容格式',
+        content: parseData?.msg || '未能成功解析该 Excel 文件，请检查表头或内容格式',
         showCancel: false
       })
       resetUpload()
@@ -359,28 +347,24 @@ const confirmImport = async () => {
   try {
     const catId = currentCatId.value || uni.getStorageSync('currentCatId') || 'default'
 
-    // @ts-ignore
-    const importRes = await wx.cloud.callFunction({
-      name: 'importExcel',
-      data: {
-        action: 'import',
-        fileID: uploadedFileID.value,
-        catId: catId,
-        parsedData: parseResult.value.parsedData,
-        skipDuplicates: skipDuplicates.value
-      }
+    const importData = await callCloudFunction('importExcel', {
+      action: 'import',
+      fileID: uploadedFileID.value,
+      catId: catId,
+      parsedData: parseResult.value.parsedData,
+      skipDuplicates: skipDuplicates.value
     })
 
     uni.hideLoading()
 
-    if (importRes.result && importRes.result.code === 0) {
-      importSuccessResult.value = importRes.result
+    if (importData && importData.code === 0) {
+      importSuccessResult.value = importData
       markDataDirty()
       uni.showToast({ title: '导入完成', icon: 'success' })
     } else {
       uni.showModal({
         title: '导入提示',
-        content: importRes.result?.msg || '未能成功导入数据，请稍后重试',
+        content: importData?.msg || '未能成功导入数据，请稍后重试',
         showCancel: false
       })
     }

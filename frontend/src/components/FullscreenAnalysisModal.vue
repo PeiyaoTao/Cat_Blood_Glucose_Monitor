@@ -20,9 +20,16 @@
         </view>
       </view>
 
-      <!-- 时间维度切换 [ 天 | 周 | 月 ] -->
+      <!-- 时间维度切换 [ 日内 | 天 | 周 | 月 ] -->
       <view class="fs-tab-wrapper" @tap.stop>
         <view class="fs-tab-bar">
+          <view 
+            class="fs-tab-item" 
+            :class="{ active: currentTab === 'intraday' }" 
+            @tap="switchTab('intraday')"
+          >
+            日内
+          </view>
           <view 
             class="fs-tab-item" 
             :class="{ active: currentTab === 'day' }" 
@@ -47,29 +54,55 @@
         </view>
       </view>
 
-      <!-- 趋势分析快捷切换 [ 近7天 | 近14天 | 近30天 | 全部 ] (居左对齐，无文字前缀，无emoji) -->
-      <view class="fs-quick-bar" @tap.stop>
+      <!-- 1. 日内视图专属：有记录日期跳跃导航栏 -->
+      <view class="fs-intraday-nav" v-if="currentTab === 'intraday'" @tap.stop>
+        <view 
+          class="fs-nav-step-btn" 
+          :class="{ disabled: !hasPrevActiveDate }" 
+          @tap="stepIntradayDate(-1)"
+        >
+          <text>‹ 上一记录日</text>
+        </view>
+
+        <picker mode="date" :value="intradayDate" @change="onIntradayDatePick">
+          <view class="fs-nav-date-Mid">
+            <text class="fs-nav-date-text">{{ intradayDateDisplay }}</text>
+            <text class="fs-nav-date-sub">{{ intradayCountText }}</text>
+          </view>
+        </picker>
+
+        <view 
+          class="fs-nav-step-btn" 
+          :class="{ disabled: !hasNextActiveDate }" 
+          @tap="stepIntradayDate(1)"
+        >
+          <text>下一记录日 ›</text>
+        </view>
+      </view>
+
+      <!-- 2. 天/周/月 趋势分析快捷切换 [ 近7次 | 近14次 | 近30次 | 全部 ] -->
+      <view class="fs-quick-bar" v-else @tap.stop>
         <view class="fs-quick-pills">
           <view 
             class="fs-quick-pill" 
             :class="{ active: currentQuickRange === '7d' }" 
             @tap="applyQuickRange('7d')"
           >
-            近7天
+            {{ currentTab === 'day' ? '近7日' : '近7期' }}
           </view>
           <view 
             class="fs-quick-pill" 
             :class="{ active: currentQuickRange === '14d' }" 
             @tap="applyQuickRange('14d')"
           >
-            近14天
+            {{ currentTab === 'day' ? '近14日' : '近14期' }}
           </view>
           <view 
             class="fs-quick-pill" 
             :class="{ active: currentQuickRange === '30d' }" 
             @tap="applyQuickRange('30d')"
           >
-            近30天
+            {{ currentTab === 'day' ? '近30日' : '近30期' }}
           </view>
           <view 
             class="fs-quick-pill" 
@@ -79,30 +112,66 @@
             全部
           </view>
         </view>
+        <text class="fs-latest-anchor-hint" v-if="latestAnchorHint">{{ latestAnchorHint }}</text>
       </view>
 
-      <!-- 主分析容器：全屏自适应布局 -->
+      <!-- 3. 天视图专属：动态时效同口径筛选栏（自动提取全部预设与自定义时效） -->
+      <view class="fs-period-filter-wrap" v-if="currentTab === 'day' && availablePeriods.length > 1" @tap.stop>
+        <scroll-view scroll-x class="fs-period-scroll" :show-scrollbar="false">
+          <view class="fs-period-row">
+            <view
+              class="fs-period-chip"
+              :class="{ active: selectedPeriodFilter === 'all' }"
+              @tap="selectPeriodFilter('all')"
+            >
+              全部时效
+            </view>
+            <view
+              class="fs-period-chip"
+              :class="{ active: selectedPeriodFilter === p }"
+              v-for="p in availablePeriods"
+              :key="p"
+              @tap="selectPeriodFilter(p)"
+            >
+              {{ p }}
+            </view>
+          </view>
+        </scroll-view>
+      </view>
+
+      <!-- 主分析容器 -->
       <view class="fs-main-body">
-        
-        <!-- 1. 血糖走势区块 (左侧大数字 + 图表) -->
         <view class="fs-section" id="glucoseSection">
           <view class="fs-metric-header" @tap.stop="handleBackgroundTap">
             <view class="fs-metric-top-bar">
               <text class="fs-range-text">{{ currentGlucoseRangeText }}</text>
-              <!-- 选项 A：Y 轴顶部微型切换胶囊 (聚焦 20 / 全景 35)，无 emoji -->
-              <view 
-                class="fs-y-toggle" 
-                :class="{ panorama: yAxisMode === 'panorama' }"
-                @tap.stop="toggleYAxisMode"
-              >
-                <text class="fs-y-toggle-text">{{ yAxisToggleLabel }}</text>
-                <view class="fs-y-toggle-dot" v-if="hasOutlierInView && yAxisMode === 'focus'"></view>
+              <view class="fs-top-right-actions">
+                <!-- 天视图下选中多测日时，支持一键下钻至当日日内曲线 -->
+                <view
+                  class="fs-drilldown-btn"
+                  v-if="currentTab === 'day' && isPointSelected && selectedPoint.dateKey"
+                  @tap.stop="drillDownToIntraday(selectedPoint.dateKey)"
+                >
+                  <text>当日日内曲线 ›</text>
+                </view>
+                <!-- Y 轴模式切换胶囊 (聚焦 20 / 全景 35) -->
+                <view 
+                  class="fs-y-toggle" 
+                  :class="{ panorama: yAxisMode === 'panorama' }"
+                  @tap.stop="toggleYAxisMode"
+                >
+                  <text class="fs-y-toggle-text">{{ yAxisToggleLabel }}</text>
+                  <view class="fs-y-toggle-dot" v-if="hasOutlierInView && yAxisMode === 'focus'"></view>
+                </view>
               </view>
             </view>
+
             <view class="fs-tag-row">
-              <text class="fs-mode-tag">{{ isPointSelected ? selectedGlucoseTag : '平均' }}</text>
+              <text class="fs-mode-tag">{{ currentHeaderModeTag }}</text>
               <text class="fs-metric-label">血糖</text>
+              <text class="fs-minmax-hint" v-if="selectedDayMinMaxText">{{ selectedDayMinMaxText }}</text>
             </view>
+
             <view class="fs-value-row">
               <text class="fs-big-number">{{ currentGlucoseDisplay }}</text>
               <text class="fs-unit" v-if="hasGlucoseValue">mmol/L</text>
@@ -110,15 +179,61 @@
                 {{ glucoseStatusText }}
               </text>
               <text class="fs-status-badge badge-gray" v-else>
-                未记录
+                无血糖记录
               </text>
             </view>
           </view>
 
-          <!-- 血糖图表 Canvas 2D 容器 (无震动纯净触控、丝滑手势拖拽、支持最大放大至3~4份数据) -->
+          <!-- 多维事件叠加控制栏（仅在 日内 / 天 视图展示，默认全部关闭保持纯净） -->
+          <view class="fs-overlay-bar" v-if="currentTab === 'intraday' || currentTab === 'day'" @tap.stop>
+            <text class="fs-overlay-label">叠加事件:</text>
+            <view class="fs-overlay-chips">
+              <view
+                class="fs-ov-chip chip-insulin"
+                :class="{ active: overlays.insulin }"
+                @tap="toggleOverlay('insulin')"
+              >
+                <view class="ov-dot dot-insulin"></view>
+                <text>打针</text>
+              </view>
+              <view
+                class="fs-ov-chip chip-meal"
+                :class="{ active: overlays.meal }"
+                @tap="toggleOverlay('meal')"
+              >
+                <view class="ov-dot dot-meal"></view>
+                <text>饮食</text>
+              </view>
+              <view
+                class="fs-ov-chip chip-excretion"
+                :class="{ active: overlays.excretion }"
+                @tap="toggleOverlay('excretion')"
+              >
+                <view class="ov-dot dot-excretion"></view>
+                <text>排泄</text>
+              </view>
+              <view
+                class="fs-ov-chip chip-weight"
+                :class="{ active: overlays.weight }"
+                @tap="toggleOverlay('weight')"
+              >
+                <view class="ov-dot dot-weight"></view>
+                <text>体重</text>
+              </view>
+              <view
+                class="fs-ov-clear"
+                v-if="hasAnyOverlayActive"
+                @tap="clearAllOverlays"
+              >
+                <text>全关</text>
+              </view>
+            </view>
+          </view>
+
+          <!-- 主图表 Canvas 2D 容器 -->
           <view 
             class="fs-canvas-box" 
-            :class="[zoomLimitClass, edgeLimitClass]"
+            :class="[zoomLimitClass, edgeLimitClass, { 'has-overlays': hasAnyOverlayActive }]"
             @tap.stop
             @touchstart="handleTouchStart" 
             @touchmove.stop="handleTouchMove" 
@@ -134,84 +249,33 @@
           </view>
         </view>
 
-        <!-- 2. 体重对比区块：平常折叠显示，点击展开 -->
-        <view 
-          class="fs-weight-collapsed-bar" 
-          v-if="!isWeightExpanded" 
-          @tap.stop="toggleWeightExpanded"
-        >
-          <view class="fs-wbar-left">
-            <view class="fs-wbar-badge-icon">
-              <text class="fs-wbar-icon-text">WT</text>
-            </view>
-            <view class="fs-wbar-info">
-              <view class="fs-wbar-title-row">
-                <text class="fs-wbar-title">体重对比走势</text>
-                <text class="fs-status-badge badge-blue fs-wbar-badge" v-if="hasWeightValue">正常</text>
-              </view>
-              <text class="fs-wbar-sub">{{ currentWeightCollapsedSubText }}</text>
-            </view>
+        <!-- 底部：选中节点或当日多维事件详情摘要卡（仅在有内容时精简展示，无冗余副图） -->
+        <view class="fs-detail-panel" v-if="detailPanelItems.length > 0" @tap.stop>
+          <view class="fs-detail-header">
+            <text class="fs-detail-title">{{ detailPanelTitle }}</text>
+            <text
+              class="fs-detail-drill"
+              v-if="currentTab === 'day' && selectedPoint.dateKey"
+              @tap="drillDownToIntraday(selectedPoint.dateKey)"
+            >
+              进入该日时间轴 ›
+            </text>
           </view>
-          
-          <view class="fs-wbar-right">
-            <view class="fs-wbar-val-block" v-if="hasWeightValue">
-              <text class="fs-wbar-val">{{ currentWeightValueDisplay }}</text>
-              <text class="fs-wbar-unit">kg</text>
-            </view>
-            <text class="fs-wbar-empty" v-else>未记录</text>
-            <view class="fs-wbar-btn">
-              <text class="fs-wbar-btn-text">展开</text>
-              <text class="fs-wbar-arrow">▼</text>
-            </view>
-          </view>
-        </view>
-
-        <!-- 2. 体重对比区块：展开形态 (用户点击展开后显示) -->
-        <view class="fs-section fs-section-border" id="weightSection" v-else>
-          <view class="fs-metric-header" @tap.stop="handleBackgroundTap">
-            <view class="fs-metric-top-bar">
-              <text class="fs-range-text">{{ currentWeightRangeText }}</text>
-              <!-- 收起按钮 -->
-              <view class="fs-weight-collapse-btn" @tap.stop="toggleWeightExpanded">
-                <text class="fs-weight-collapse-btn-text">收起</text>
-                <text class="fs-wbar-arrow up">▲</text>
+          <scroll-view scroll-y class="fs-detail-scroll">
+            <view class="fs-detail-tags">
+              <view
+                class="fs-detail-item"
+                :class="dItem.typeClass"
+                v-for="(dItem, dIdx) in detailPanelItems"
+                :key="dIdx"
+              >
+                <text class="di-badge">{{ dItem.badge }}</text>
+                <text class="di-main">{{ dItem.main }}</text>
+                <text class="di-sub" v-if="dItem.sub">{{ dItem.sub }}</text>
               </view>
             </view>
-            <view class="fs-tag-row">
-              <text class="fs-mode-tag">{{ isPointSelected ? selectedWeightTag : '平均' }}</text>
-              <text class="fs-metric-label">体重</text>
-            </view>
-            <view class="fs-value-row">
-              <text class="fs-big-number">{{ currentWeightValueDisplay }}</text>
-              <text class="fs-unit" v-if="hasWeightValue">kg</text>
-              <text class="fs-status-badge badge-blue" v-if="hasWeightValue">
-                正常
-              </text>
-              <text class="fs-status-badge badge-gray" v-else>
-                未记录
-              </text>
-            </view>
-          </view>
-
-          <!-- 体重图表 Canvas 2D 容器 -->
-          <view 
-            class="fs-canvas-box fs-canvas-box-sm" 
-            :class="[zoomLimitClass, edgeLimitClass]"
-            @tap.stop
-            @touchstart="handleTouchStart" 
-            @touchmove.stop="handleTouchMove" 
-            @touchend="handleTouchEnd"
-            @touchcancel="handleTouchCancel"
-          >
-            <canvas 
-              type="2d" 
-              id="weightFsCanvas" 
-              class="fs-canvas"
-              @tap.stop
-            ></canvas>
-          </view>
+          </scroll-view>
         </view>
-
       </view>
     </view>
   </view>
@@ -220,37 +284,110 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, getCurrentInstance, onUnmounted } from 'vue'
 import { useChartGestures } from '@/composables/useChartGestures'
+import { getLocalTodayDate } from '@/utils/api'
+import { evaluateGlucoseStatus, normalizeTargetRange } from '@/utils/glucoseDomain'
+import {
+  drawSelectionBeam,
+  drawClampedPointLabel,
+  drawClampedXAxisLabel
+} from '@/utils/chartRenderer'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   visible: boolean
   glucoseRecords: any[]
   weightRecords: any[]
+  insulinRecords?: any[]
+  mealRecords?: any[]
+  excretionRecords?: any[]
   targetMin: number
   targetMax: number
-}>()
+}>(), {
+  insulinRecords: () => [],
+  mealRecords: () => [],
+  excretionRecords: () => []
+})
 
 const emit = defineEmits(['update:visible', 'close'])
 
 const instance = getCurrentInstance()
 const isAnimShow = ref(false)
-const currentTab = ref<'day' | 'week' | 'month'>('day')
-const currentZoomCount = ref<number>(7) // 渐进平滑缩放数据量 (最大可放大至 3~4 份数据，默认 7 份)
-const currentQuickRange = ref<'7d' | '14d' | '30d' | 'all' | ''>('7d') // 趋势分析选中的范围
-const yAxisMode = ref<'focus' | 'panorama'>('focus') // Y轴视窗模式：'focus' (聚焦20) | 'panorama' (全景自适应)
-const selectedPointIndex = ref<number>(-1) // -1 表示未选中任何具体点，显示平均值
+const currentTab = ref<'intraday' | 'day' | 'week' | 'month'>('day')
+const currentZoomCount = ref<number>(7)
+const currentQuickRange = ref<'7d' | '14d' | '30d' | 'all' | ''>('7d')
+const yAxisMode = ref<'focus' | 'panorama'>('focus')
+const selectedPointIndex = ref<number>(-1)
 const visibleStartIndex = ref<number>(0)
 const visibleEndIndex = ref<number>(6)
 
+// 天视图下的动态时效过滤 ('all' 或具体 period 名称)
+const selectedPeriodFilter = ref<string>('all')
+
+// 日内视图当前选中的日期 (YYYY-MM-DD)
+const intradayDate = ref<string>(getLocalTodayDate())
+
+// 多维事件叠加状态（严格遵守默认全部关闭，避免画面杂乱）
+const overlays = ref({
+  insulin: false,
+  meal: false,
+  excretion: false,
+  weight: false
+})
+
+const hasAnyOverlayActive = computed(() => {
+  if (currentTab.value !== 'intraday' && currentTab.value !== 'day') return false
+  return overlays.value.insulin || overlays.value.meal || overlays.value.excretion || overlays.value.weight
+})
+
+const activeOverlayKeys = computed<Array<'insulin' | 'meal' | 'excretion' | 'weight'>>(() => {
+  if (currentTab.value !== 'intraday' && currentTab.value !== 'day') return []
+  const keys: Array<'insulin' | 'meal' | 'excretion' | 'weight'> = []
+  if (overlays.value.insulin) keys.push('insulin')
+  if (overlays.value.meal) keys.push('meal')
+  if (overlays.value.excretion) keys.push('excretion')
+  if (overlays.value.weight) keys.push('weight')
+  return keys
+})
+
+const toggleOverlay = (key: 'insulin' | 'meal' | 'excretion' | 'weight') => {
+  overlays.value[key] = !overlays.value[key]
+  prepareData()
+  nextTick(() => {
+    initGlucoseCanvas(() => {
+      const fullList = getFullListForCurrentTab()
+      if (selectedPointIndex.value >= fullList.length) {
+        selectedPointIndex.value = -1
+      }
+      scrollX = Math.max(getMinScrollX(), Math.min(0, scrollX))
+      updateVisibleMetrics()
+      drawMainAnalysisChart()
+    })
+  })
+}
+
+const clearAllOverlays = () => {
+  overlays.value.insulin = false
+  overlays.value.meal = false
+  overlays.value.excretion = false
+  overlays.value.weight = false
+  showToastTip('已关闭全部附加事件图层')
+  prepareData()
+  nextTick(() => {
+    initGlucoseCanvas(() => {
+      selectedPointIndex.value = -1
+      scrollX = getMinScrollX()
+      updateVisibleMetrics()
+      drawMainAnalysisChart()
+    })
+  })
+}
+
 let glucoseCanvasNode: any = null
 let glucoseCtx: any = null
-let weightCanvasNode: any = null
-let weightCtx: any = null
 let canvasWidth = 330
-let glucoseCanvasHeight = 170
-let weightCanvasHeight = 115
+let glucoseCanvasHeight = 200
 let canvasBoxLeft = 0
 
-// 动画与交互反馈状态 (纯视觉极值动效，完全移除震动反馈)
+// 动画与交互反馈状态
 const zoomLimitClass = ref('')
 const edgeLimitClass = ref('')
 let edgeTimer: any = null
@@ -266,7 +403,6 @@ const showToastTip = (msg: string) => {
   }, 1300)
 }
 
-// 触发滑达最早/最新数据边界微弹性反馈动画
 const triggerEdgeLimitAnimation = (direction: 'left' | 'right', tipText?: string) => {
   edgeLimitClass.value = direction === 'left' ? 'fs-edge-limit-left' : 'fs-edge-limit-right'
   showToastTip(tipText || (direction === 'left' ? '已至最早记录' : '已至最新记录'))
@@ -277,318 +413,630 @@ const triggerEdgeLimitAnimation = (direction: 'left' | 'right', tipText?: string
   }, 260)
 }
 
+interface OverlaySummary {
+  insulinText?: string
+  insulinList: Array<{ time: string; dose: number; period: string; type: string }>
+  mealText?: string
+  mealList: Array<{ time: string; grams: number; brand: string; period: string }>
+  excretionText?: string
+  excretionList: Array<{ time: string; urine: string; stool: string }>
+  weightText?: string
+  weightList: Array<{ time: string; weight: number }>
+}
+
 interface ChartItem {
+  dateKey: string
   date: string
   dayNum: string
   bg: number | null
-  wt: number | null
+  bgMin?: number | null
+  bgMax?: number | null
   bgCount: number
+  singlePeriod?: string
+  singleTime?: string
+  bgDetails: Array<{ time: string; val: number; period: string; note?: string }>
+  wt: number | null
   wtCount: number
   timestamp: number
+  overlay: OverlaySummary
 }
 
-// 整理后的数据集
+const processedIntradayItems = ref<ChartItem[]>([])
 const processedDayItems = ref<ChartItem[]>([])
 const processedWeekItems = ref<ChartItem[]>([])
 const processedMonthItems = ref<ChartItem[]>([])
+const allActiveDates = ref<string[]>([])
 
-const parseItemDate = (item: any) => {
+const pad2 = (n: number) => n.toString().padStart(2, '0')
+
+const parseItemDateAndTime = (item: any, timeField?: string) => {
   let y = 2026, m = 1, d = 1
-  if (item.record_date && item.record_date.includes('-')) {
+  if (item.record_date && typeof item.record_date === 'string' && item.record_date.includes('-')) {
     const parts = item.record_date.split('-').map(Number)
-    y = parts[0]
-    m = parts[1]
-    d = parts[2]
+    if (parts.length >= 3 && parts[0] > 1990) {
+      y = parts[0]
+      m = parts[1]
+      d = parts[2]
+    }
   } else if (item.createTime) {
     const dt = new Date(item.createTime)
-    y = dt.getFullYear()
-    m = dt.getMonth() + 1
-    d = dt.getDate()
+    if (!isNaN(dt.getTime())) {
+      y = dt.getFullYear()
+      m = dt.getMonth() + 1
+      d = dt.getDate()
+    }
   }
-  const pad = (n: number) => n.toString().padStart(2, '0')
-  const sortKey = `${y}-${pad(m)}-${pad(d)}`
+  const sortKey = `${y}-${pad2(m)}-${pad2(d)}`
   const dStr = `${m}/${d}`
-  const dayNum = d === 1 ? `${m}/${d}` : `${d}`
+  const dayNum = `${m}/${d}`
   const timestamp = new Date(y, m - 1, d).getTime()
-  return { sortKey, dStr, dayNum, timestamp }
+
+  let rawTime = (timeField && item[timeField]) || item.measure_time || item.inject_time || item.meal_time || item.record_time || ''
+  if (!rawTime && item.createTime) {
+    const dt = new Date(item.createTime)
+    if (!isNaN(dt.getTime())) {
+      rawTime = `${pad2(dt.getHours())}:${pad2(dt.getMinutes())}`
+    }
+  }
+  if (!/^\d{2}:\d{2}$/.test(rawTime)) {
+    const mTime = String(rawTime).match(/(\d{1,2}):(\d{2})/)
+    rawTime = mTime ? `${pad2(Number(mTime[1]))}:${mTime[2]}` : '12:00'
+  }
+  return { sortKey, dStr, dayNum, timestamp, timeStr: rawTime }
 }
 
-// 预处理数据：单日多次测试统一计算当日平均值（一天对应时间轴上的一个点）
+// 动态提取当前猫咪所有实际使用过的时效阶段 + 自定义预设时效
+const availablePeriods = computed<string[]>(() => {
+  const counts = new Map<string, number>()
+  ;(props.glucoseRecords || []).forEach((item: any) => {
+    const p = String(item.period || item.status || '').trim()
+    if (p) {
+      counts.set(p, (counts.get(p) || 0) + 1)
+    }
+  })
+  try {
+    const customSaved = uni.getStorageSync('custom_bg_periods')
+    const parsed = typeof customSaved === 'string' ? JSON.parse(customSaved) : customSaved
+    if (Array.isArray(parsed)) {
+      parsed.forEach((p: any) => {
+        const s = String(p || '').trim()
+        if (s && !counts.has(s)) counts.set(s, 0)
+      })
+    }
+  } catch (e) {}
+
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(entry => entry[0])
+})
+
+const selectPeriodFilter = (period: string) => {
+  if (selectedPeriodFilter.value === period) return
+  selectedPeriodFilter.value = period
+  prepareData()
+  selectedPointIndex.value = -1
+  scrollX = getMinScrollX()
+  updateVisibleMetrics()
+  drawMainAnalysisChart()
+  showToastTip(period === 'all' ? '展示全部时效记录' : `仅筛选「${period}」同口径对比`)
+}
+
+const createEmptyOverlay = (): OverlaySummary => ({
+  insulinList: [],
+  mealList: [],
+  excretionList: [],
+  weightList: []
+})
+
+const finalizeOverlaySummary = (ov: OverlaySummary) => {
+  if (ov.insulinList.length > 0) {
+    const totalU = ov.insulinList.reduce((s, x) => s + x.dose, 0)
+    ov.insulinText = ov.insulinList.length === 1
+      ? `${Number(totalU.toFixed(2))}U`
+      : `${Number(totalU.toFixed(2))}U(${ov.insulinList.length}针)`
+  }
+  if (ov.mealList.length > 0) {
+    const totalG = ov.mealList.reduce((s, x) => s + x.grams, 0)
+    ov.mealText = `${Math.round(totalG)}g`
+  }
+  if (ov.excretionList.length > 0) {
+    const first = ov.excretionList[0]
+    const shortUrine = first.urine ? first.urine.split(' ')[0].replace('正常', '尿常') : '排泄'
+    ov.excretionText = ov.excretionList.length > 1 ? `排x${ov.excretionList.length}` : shortUrine.slice(0, 4)
+  }
+  if (ov.weightList.length > 0) {
+    const lastW = ov.weightList[ov.weightList.length - 1].weight
+    ov.weightText = `${lastW.toFixed(1)}kg`
+  }
+}
+
+// 构建日内曲线数据 (针对 intradayDate 当日按时间 HH:mm 排序)
+const buildIntradayItems = (targetDateKey: string) => {
+  const timeBuckets: Record<string, ChartItem> = {}
+  const [y, m, d] = targetDateKey.split('-').map(Number)
+  const baseDateLabel = `${m}/${d}`
+
+  const ensureSlot = (timeStr: string): ChartItem => {
+    if (!timeBuckets[timeStr]) {
+      const [hh, mm] = timeStr.split(':').map(Number)
+      const ts = new Date(y, m - 1, d, hh || 0, mm || 0).getTime()
+      timeBuckets[timeStr] = {
+        dateKey: targetDateKey,
+        date: `${baseDateLabel} ${timeStr}`,
+        dayNum: timeStr,
+        bg: null,
+        bgCount: 0,
+        bgDetails: [],
+        wt: null,
+        wtCount: 0,
+        timestamp: ts,
+        overlay: createEmptyOverlay()
+      }
+    }
+    return timeBuckets[timeStr]
+  }
+
+  // 1. 当日血糖
+  ;(props.glucoseRecords || []).forEach((item: any) => {
+    const bgVal = Number(item.bg_value)
+    if (!Number.isFinite(bgVal) || bgVal <= 0) return
+    const info = parseItemDateAndTime(item, 'measure_time')
+    if (info.sortKey !== targetDateKey) return
+    const slot = ensureSlot(info.timeStr)
+    const pName = item.period || item.status || '常规'
+    slot.bgDetails.push({ time: info.timeStr, val: bgVal, period: pName, note: item.note })
+    slot.bgCount = slot.bgDetails.length
+    const sum = slot.bgDetails.reduce((s, x) => s + x.val, 0)
+    slot.bg = Number((sum / slot.bgCount).toFixed(1))
+    slot.singlePeriod = pName
+    slot.singleTime = info.timeStr
+  })
+
+  // 2. 当日叠加事件（仅在对应开关开启或当日作为时间轴展示时收录）
+  if (overlays.value.insulin) {
+    ;(props.insulinRecords || []).forEach((item: any) => {
+      const dose = Number(item.dose)
+      if (!Number.isFinite(dose) || dose <= 0) return
+      const info = parseItemDateAndTime(item, 'inject_time')
+      if (info.sortKey !== targetDateKey) return
+      const slot = ensureSlot(info.timeStr)
+      slot.overlay.insulinList.push({
+        time: info.timeStr,
+        dose,
+        period: item.period || '打针',
+        type: item.insulin_type || '胰岛素'
+      })
+    })
+  }
+
+  if (overlays.value.meal) {
+    ;(props.mealRecords || []).forEach((item: any) => {
+      const grams = Number(item.food_grams)
+      if (!Number.isFinite(grams) || grams <= 0) return
+      const info = parseItemDateAndTime(item, 'meal_time')
+      if (info.sortKey !== targetDateKey) return
+      const slot = ensureSlot(info.timeStr)
+      slot.overlay.mealList.push({
+        time: info.timeStr,
+        grams,
+        brand: item.food_brand || '',
+        period: item.period || '进食'
+      })
+    })
+  }
+
+  if (overlays.value.excretion) {
+    ;(props.excretionRecords || []).forEach((item: any) => {
+      const info = parseItemDateAndTime(item, 'record_time')
+      if (info.sortKey !== targetDateKey) return
+      const slot = ensureSlot(info.timeStr)
+      slot.overlay.excretionList.push({
+        time: info.timeStr,
+        urine: item.urine || '排尿正常',
+        stool: item.stool_status || ''
+      })
+    })
+  }
+
+  if (overlays.value.weight) {
+    ;(props.weightRecords || []).forEach((item: any) => {
+      const wtVal = Number(item.weight_value)
+      if (!Number.isFinite(wtVal) || wtVal <= 0) return
+      const info = parseItemDateAndTime(item, 'measure_time')
+      if (info.sortKey !== targetDateKey) return
+      const slot = ensureSlot(info.timeStr)
+      slot.wt = wtVal
+      slot.wtCount++
+      slot.overlay.weightList.push({
+        time: info.timeStr,
+        weight: wtVal
+      })
+    })
+  }
+
+  const sortedTimes = Object.keys(timeBuckets).sort()
+  const list = sortedTimes.map(t => {
+    const slot = timeBuckets[t]
+    finalizeOverlaySummary(slot.overlay)
+    return slot
+  })
+  processedIntradayItems.value = list
+}
+
+// 预处理全量数据：采用「紧凑有效记录日」策略，彻底告别断更空白图
 const prepareData = () => {
-  // 1. 归并血糖和体重至自然日 Map
+  const activeDateSet = new Set<string>()
   const dateMap: Record<string, {
     sortKey: string
     dStr: string
     dayNum: string
     timestamp: number
-    bgList: number[]
+    bgDetails: Array<{ time: string; val: number; period: string; note?: string }>
     wtList: number[]
+    overlay: OverlaySummary
   }> = {}
 
-  if (props.glucoseRecords && props.glucoseRecords.length > 0) {
-    props.glucoseRecords.forEach((item: any) => {
-      if (typeof item.bg_value !== 'number') return
-      const info = parseItemDate(item)
-      if (!dateMap[info.sortKey]) {
-        dateMap[info.sortKey] = {
-          sortKey: info.sortKey,
-          dStr: info.dStr,
-          dayNum: info.dayNum,
-          timestamp: info.timestamp,
-          bgList: [],
-          wtList: []
-        }
+  const ensureDateBucket = (info: { sortKey: string; dStr: string; dayNum: string; timestamp: number }) => {
+    activeDateSet.add(info.sortKey)
+    if (!dateMap[info.sortKey]) {
+      dateMap[info.sortKey] = {
+        sortKey: info.sortKey,
+        dStr: info.dStr,
+        dayNum: info.dayNum,
+        timestamp: info.timestamp,
+        bgDetails: [],
+        wtList: [],
+        overlay: createEmptyOverlay()
       }
-      dateMap[info.sortKey].bgList.push(item.bg_value)
-    })
-  }
-
-  if (props.weightRecords && props.weightRecords.length > 0) {
-    props.weightRecords.forEach((item: any) => {
-      if (typeof item.weight_value !== 'number') return
-      const info = parseItemDate(item)
-      if (!dateMap[info.sortKey]) {
-        dateMap[info.sortKey] = {
-          sortKey: info.sortKey,
-          dStr: info.dStr,
-          dayNum: info.dayNum,
-          timestamp: info.timestamp,
-          bgList: [],
-          wtList: []
-        }
-      }
-      dateMap[info.sortKey].wtList.push(item.weight_value)
-    })
-  }
-
-  const sortedDates = Object.keys(dateMap).sort()
-  const pad = (n: number) => n.toString().padStart(2, '0')
-
-  // 确定全局日期的起止时间（确保时间轴是严格连续的自然日历时间轴，不存在任何日期跳跃）
-  const now = new Date()
-  const todayKey = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
-
-  let startDate: Date
-  let endDate: Date
-
-  if (sortedDates.length === 0) {
-    // 无任何记录时，默认生成至今天为止的近 30 天连续时间轴
-    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
-    const start = new Date(end.getTime() - 29 * 24 * 3600 * 1000)
-    startDate = start
-    endDate = end
-  } else {
-    const firstKey = sortedDates[0]
-    const lastKey = sortedDates[sortedDates.length - 1]
-
-    const firstParts = firstKey.split('-').map(Number)
-    const lastParts = lastKey.split('-').map(Number)
-    const todayParts = todayKey.split('-').map(Number)
-
-    const firstD = new Date(firstParts[0], firstParts[1] - 1, firstParts[2], 0, 0, 0, 0)
-    const lastD = new Date(lastParts[0], lastParts[1] - 1, lastParts[2], 0, 0, 0, 0)
-    const todayD = new Date(todayParts[0], todayParts[1] - 1, todayParts[2], 0, 0, 0, 0)
-
-    // 截止日期：取最新记录与今天中的较晚者
-    endDate = lastD.getTime() > todayD.getTime() ? lastD : todayD
-
-    // 起始日期：保证日维度总跨度至少包含 30 天，无缝支持近 7 / 14 / 30 天快速趋势缩放分析
-    const minDays = 30
-    const spanDays = Math.round((endDate.getTime() - firstD.getTime()) / (24 * 3600 * 1000)) + 1
-    if (spanDays < minDays) {
-      startDate = new Date(endDate.getTime() - (minDays - 1) * 24 * 3600 * 1000)
-    } else {
-      startDate = firstD
     }
+    return dateMap[info.sortKey]
   }
 
-  // 2. 构建日维度 (Day) 连续自然日无间隔数据集
-  const dayItemList: ChartItem[] = []
-  let walker = new Date(startDate.getTime())
-  const endTs = endDate.getTime()
+  // 1. 归并血糖记录（同时记录全量活跃日期）
+  ;(props.glucoseRecords || []).forEach((item: any) => {
+    const bgVal = Number(item.bg_value)
+    if (!Number.isFinite(bgVal) || bgVal <= 0) return
+    const info = parseItemDateAndTime(item, 'measure_time')
+    activeDateSet.add(info.sortKey)
 
-  while (walker.getTime() <= endTs) {
-    const y = walker.getFullYear()
-    const m = walker.getMonth() + 1
-    const d = walker.getDate()
-    const key = `${y}-${pad(m)}-${pad(d)}`
-    const dStr = `${m}/${d}`
-    // 在进入新的月份时（每月1号），在 X 轴显示月份与日期（如 10/1），其它日子显示单独日期（如 29 30 10/1 2 3）
-    const dayNum = d === 1 ? `${m}/${d}` : `${d}`
-    const ts = walker.getTime()
-
-    const dayData = dateMap[key]
-    const bgAvg = dayData && dayData.bgList.length
-      ? Math.round((dayData.bgList.reduce((s, x) => s + x, 0) / dayData.bgList.length) * 10) / 10
-      : null
-    const wtAvg = dayData && dayData.wtList.length
-      ? Math.round((dayData.wtList.reduce((s, x) => s + x, 0) / dayData.wtList.length) * 100) / 100
-      : null
-
-    dayItemList.push({
-      date: dStr,
-      dayNum: dayNum,
-      bg: bgAvg,
-      wt: wtAvg,
-      bgCount: dayData ? dayData.bgList.length : 0,
-      wtCount: dayData ? dayData.wtList.length : 0,
-      timestamp: ts
+    const pName = String(item.period || item.status || '常规').trim()
+    if (selectedPeriodFilter.value !== 'all' && pName !== selectedPeriodFilter.value) {
+      return
+    }
+    const bucket = ensureDateBucket(info)
+    bucket.bgDetails.push({
+      time: info.timeStr,
+      val: bgVal,
+      period: pName,
+      note: item.note
     })
+  })
 
-    walker.setDate(walker.getDate() + 1)
+  // 2. 收集其他事件日期与当日叠加摘要
+  ;(props.insulinRecords || []).forEach((item: any) => {
+    const dose = Number(item.dose)
+    if (!Number.isFinite(dose) || dose <= 0) return
+    const info = parseItemDateAndTime(item, 'inject_time')
+    activeDateSet.add(info.sortKey)
+    if (overlays.value.insulin || dateMap[info.sortKey]) {
+      const bucket = ensureDateBucket(info)
+      bucket.overlay.insulinList.push({
+        time: info.timeStr,
+        dose,
+        period: item.period || '打针',
+        type: item.insulin_type || '胰岛素'
+      })
+    }
+  })
+
+  ;(props.mealRecords || []).forEach((item: any) => {
+    const grams = Number(item.food_grams)
+    if (!Number.isFinite(grams) || grams <= 0) return
+    const info = parseItemDateAndTime(item, 'meal_time')
+    activeDateSet.add(info.sortKey)
+    if (overlays.value.meal || dateMap[info.sortKey]) {
+      const bucket = ensureDateBucket(info)
+      bucket.overlay.mealList.push({
+        time: info.timeStr,
+        grams,
+        brand: item.food_brand || '',
+        period: item.period || '进食'
+      })
+    }
+  })
+
+  ;(props.excretionRecords || []).forEach((item: any) => {
+    const info = parseItemDateAndTime(item, 'record_time')
+    activeDateSet.add(info.sortKey)
+    if (overlays.value.excretion || dateMap[info.sortKey]) {
+      const bucket = ensureDateBucket(info)
+      bucket.overlay.excretionList.push({
+        time: info.timeStr,
+        urine: item.urine || '排尿正常',
+        stool: item.stool_status || ''
+      })
+    }
+  })
+
+  ;(props.weightRecords || []).forEach((item: any) => {
+    const wtVal = Number(item.weight_value)
+    if (!Number.isFinite(wtVal) || wtVal <= 0) return
+    const info = parseItemDateAndTime(item, 'measure_time')
+    activeDateSet.add(info.sortKey)
+    if (overlays.value.weight || dateMap[info.sortKey]) {
+      const bucket = ensureDateBucket(info)
+      bucket.wtList.push(wtVal)
+      bucket.overlay.weightList.push({
+        time: info.timeStr,
+        weight: wtVal
+      })
+    }
+  })
+
+  const sortedAllActive = Array.from(activeDateSet).sort()
+  allActiveDates.value = sortedAllActive
+
+  // 若当前日内日期无任何数据，自动锚定到最近一个有记录的日期
+  if (sortedAllActive.length > 0 && !activeDateSet.has(intradayDate.value)) {
+    intradayDate.value = sortedAllActive[sortedAllActive.length - 1]
   }
+
+  // 构建紧凑「天」视图数据集（仅包含有记录的日期，消除断更期大片空白）
+  const sortedDayKeys = Object.keys(dateMap)
+    .filter(k => {
+      const b = dateMap[k]
+      if (b.bgDetails.length > 0) return true
+      if (overlays.value.insulin && b.overlay.insulinList.length > 0) return true
+      if (overlays.value.meal && b.overlay.mealList.length > 0) return true
+      if (overlays.value.excretion && b.overlay.excretionList.length > 0) return true
+      if (overlays.value.weight && b.overlay.weightList.length > 0) return true
+      return false
+    })
+    .sort()
+
+  const dayItemList: ChartItem[] = sortedDayKeys.map(key => {
+    const b = dateMap[key]
+    b.bgDetails.sort((x, y) => x.time.localeCompare(y.time))
+    const bgVals = b.bgDetails.map(d => d.val)
+    const bgAvg = bgVals.length
+      ? Math.round((bgVals.reduce((s, x) => s + x, 0) / bgVals.length) * 10) / 10
+      : null
+    const bgMin = bgVals.length ? Math.min(...bgVals) : null
+    const bgMax = bgVals.length ? Math.max(...bgVals) : null
+    const wtAvg = b.wtList.length
+      ? Math.round((b.wtList.reduce((s, x) => s + x, 0) / b.wtList.length) * 100) / 100
+      : null
+
+    finalizeOverlaySummary(b.overlay)
+
+    return {
+      dateKey: key,
+      date: b.dStr,
+      dayNum: b.dStr,
+      bg: bgAvg,
+      bgMin,
+      bgMax,
+      bgCount: bgVals.length,
+      singlePeriod: bgVals.length === 1 ? b.bgDetails[0].period : undefined,
+      singleTime: bgVals.length === 1 ? b.bgDetails[0].time : undefined,
+      bgDetails: b.bgDetails,
+      wt: wtAvg,
+      wtCount: b.wtList.length,
+      timestamp: b.timestamp,
+      overlay: b.overlay
+    }
+  })
   processedDayItems.value = dayItemList
 
-  // 3. 构建周维度 (Week) 连续无间隔数据集 (以每周一为基准连续步进，无断档)
-  const getMonday = (d: Date) => {
+  // 构建紧凑「周」视图数据集（仅聚合有数据的自然周）
+  const getMonday = (ts: number) => {
+    const d = new Date(ts)
     const date = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0)
     const day = date.getDay()
-    const diff = date.getDate() - day + (day === 0 ? -6 : 1) // 调整到周一
+    const diff = date.getDate() - day + (day === 0 ? -6 : 1)
     date.setDate(diff)
     return date
   }
 
-  let startMon = getMonday(startDate)
-  const endMon = getMonday(endDate)
-
-  // 确保周维度至少有 7 周（默认视窗）
-  const minWeeks = 7
-  const totalWeeks = Math.round((endMon.getTime() - startMon.getTime()) / (7 * 24 * 3600 * 1000)) + 1
-  if (totalWeeks < minWeeks) {
-    startMon = new Date(endMon.getTime() - (minWeeks - 1) * 7 * 24 * 3600 * 1000)
-  }
-
-  const weekItemList: ChartItem[] = []
-  let curMon = new Date(startMon.getTime())
-
-  while (curMon.getTime() <= endMon.getTime()) {
-    const nextMon = new Date(curMon.getTime() + 7 * 24 * 3600 * 1000)
-    const m = curMon.getMonth() + 1
-    const d = curMon.getDate()
-    const weekLabel = `${m}/${d}周`
-
-    const bgsInWeek: number[] = []
-    const wtsInWeek: number[] = []
-
-    let dayStep = new Date(curMon.getTime())
-    while (dayStep.getTime() < nextMon.getTime()) {
-      const k = `${dayStep.getFullYear()}-${pad(dayStep.getMonth() + 1)}-${pad(dayStep.getDate())}`
-      if (dateMap[k]) {
-        bgsInWeek.push(...dateMap[k].bgList)
-        wtsInWeek.push(...dateMap[k].wtList)
-      }
-      dayStep.setDate(dayStep.getDate() + 1)
+  const weekMap = new Map<string, { monDate: Date; bgs: number[]; wts: number[] }>()
+  dayItemList.forEach(item => {
+    if (item.bg === null && item.wt === null) return
+    const mon = getMonday(item.timestamp)
+    const wKey = `${mon.getFullYear()}-${pad2(mon.getMonth() + 1)}-${pad2(mon.getDate())}`
+    if (!weekMap.has(wKey)) {
+      weekMap.set(wKey, { monDate: mon, bgs: [], wts: [] })
     }
+    const wBucket = weekMap.get(wKey)!
+    item.bgDetails.forEach(d => wBucket.bgs.push(d.val))
+    if (item.wt !== null) wBucket.wts.push(item.wt)
+  })
 
-    const avgBg = bgsInWeek.length 
-      ? Math.round((bgsInWeek.reduce((s, x) => s + x, 0) / bgsInWeek.length) * 10) / 10 
+  const sortedWeekKeys = Array.from(weekMap.keys()).sort()
+  processedWeekItems.value = sortedWeekKeys.map(wKey => {
+    const wb = weekMap.get(wKey)!
+    const m = wb.monDate.getMonth() + 1
+    const d = wb.monDate.getDate()
+    const label = `${m}/${d}周`
+    const avgBg = wb.bgs.length
+      ? Math.round((wb.bgs.reduce((s, x) => s + x, 0) / wb.bgs.length) * 10) / 10
       : null
-    const avgWt = wtsInWeek.length 
-      ? Math.round((wtsInWeek.reduce((s, x) => s + x, 0) / wtsInWeek.length) * 100) / 100 
+    const avgWt = wb.wts.length
+      ? Math.round((wb.wts.reduce((s, x) => s + x, 0) / wb.wts.length) * 100) / 100
       : null
-
-    weekItemList.push({
-      date: weekLabel,
-      dayNum: weekLabel,
+    return {
+      dateKey: wKey,
+      date: label,
+      dayNum: label,
       bg: avgBg,
+      bgMin: wb.bgs.length ? Math.min(...wb.bgs) : null,
+      bgMax: wb.bgs.length ? Math.max(...wb.bgs) : null,
+      bgCount: wb.bgs.length,
+      bgDetails: [],
       wt: avgWt,
-      bgCount: bgsInWeek.length,
-      wtCount: wtsInWeek.length,
-      timestamp: curMon.getTime()
-    })
-
-    curMon.setDate(curMon.getDate() + 7)
-  }
-  processedWeekItems.value = weekItemList
-
-  // 4. 构建月维度 (Month) 连续无间隔数据集 (自然月连续步进，无断档)
-  let startMonthYear = startDate.getFullYear()
-  let startMonthNum = startDate.getMonth() + 1
-  const endMonthYear = endDate.getFullYear()
-  const endMonthNum = endDate.getMonth() + 1
-
-  // 确保月维度至少有 6 个月（默认视窗）
-  const minMonths = 6
-  let totalMonths = (endMonthYear - startMonthYear) * 12 + (endMonthNum - startMonthNum) + 1
-  if (totalMonths < minMonths) {
-    let sub = minMonths - totalMonths
-    startMonthNum -= sub
-    while (startMonthNum <= 0) {
-      startMonthNum += 12
-      startMonthYear -= 1
+      wtCount: wb.wts.length,
+      timestamp: wb.monDate.getTime(),
+      overlay: createEmptyOverlay()
     }
-    totalMonths = minMonths
-  }
+  })
 
-  const monthItemList: ChartItem[] = []
-  let curY = startMonthYear
-  let curM = startMonthNum
-
-  for (let mi = 0; mi < totalMonths; mi++) {
-    const mLabel = `${curM}月`
-    const monthTs = new Date(curY, curM - 1, 1).getTime()
-
-    const bgsInMonth: number[] = []
-    const wtsInMonth: number[] = []
-
-    const daysInMonth = new Date(curY, curM, 0).getDate()
-    for (let di = 1; di <= daysInMonth; di++) {
-      const k = `${curY}-${pad(curM)}-${pad(di)}`
-      if (dateMap[k]) {
-        bgsInMonth.push(...dateMap[k].bgList)
-        wtsInMonth.push(...dateMap[k].wtList)
-      }
+  // 构建紧凑「月」视图数据集（仅聚合有数据的月份）
+  const monthMap = new Map<string, { year: number; month: number; bgs: number[]; wts: number[] }>()
+  dayItemList.forEach(item => {
+    if (item.bg === null && item.wt === null) return
+    const dt = new Date(item.timestamp)
+    const y = dt.getFullYear()
+    const m = dt.getMonth() + 1
+    const mKey = `${y}-${pad2(m)}`
+    if (!monthMap.has(mKey)) {
+      monthMap.set(mKey, { year: y, month: m, bgs: [], wts: [] })
     }
+    const mb = monthMap.get(mKey)!
+    item.bgDetails.forEach(d => mb.bgs.push(d.val))
+    if (item.wt !== null) mb.wts.push(item.wt)
+  })
 
-    const avgBg = bgsInMonth.length 
-      ? Math.round((bgsInMonth.reduce((s, x) => s + x, 0) / bgsInMonth.length) * 10) / 10 
+  const sortedMonthKeys = Array.from(monthMap.keys()).sort()
+  processedMonthItems.value = sortedMonthKeys.map(mKey => {
+    const mb = monthMap.get(mKey)!
+    const label = `${mb.month}月`
+    const avgBg = mb.bgs.length
+      ? Math.round((mb.bgs.reduce((s, x) => s + x, 0) / mb.bgs.length) * 10) / 10
       : null
-    const avgWt = wtsInMonth.length 
-      ? Math.round((wtsInMonth.reduce((s, x) => s + x, 0) / wtsInMonth.length) * 100) / 100 
+    const avgWt = mb.wts.length
+      ? Math.round((mb.wts.reduce((s, x) => s + x, 0) / mb.wts.length) * 100) / 100
       : null
-
-    monthItemList.push({
-      date: mLabel,
-      dayNum: mLabel,
+    return {
+      dateKey: mKey,
+      date: `${mb.year}年${mb.month}月`,
+      dayNum: label,
       bg: avgBg,
+      bgMin: mb.bgs.length ? Math.min(...mb.bgs) : null,
+      bgMax: mb.bgs.length ? Math.max(...mb.bgs) : null,
+      bgCount: mb.bgs.length,
+      bgDetails: [],
       wt: avgWt,
-      bgCount: bgsInMonth.length,
-      wtCount: wtsInMonth.length,
-      timestamp: monthTs
-    })
-
-    curM++
-    if (curM > 12) {
-      curM = 1
-      curY++
+      wtCount: mb.wts.length,
+      timestamp: new Date(mb.year, mb.month - 1, 1).getTime(),
+      overlay: createEmptyOverlay()
     }
-  }
-  processedMonthItems.value = monthItemList
+  })
+
+  // 构建当前选中日期的「日内」数据集
+  buildIntradayItems(intradayDate.value)
 }
 
-// 获取各 Tab 的缩放范围配置 (保持默认数量：天7，周7，月6；所有图表最大均可放大至显示 3 份数据，支持平滑缩放至全部数据)
+// 日内视图日期导航计算
+const currentActiveDateIdx = computed(() => {
+  return allActiveDates.value.indexOf(intradayDate.value)
+})
+
+const hasPrevActiveDate = computed(() => {
+  if (!allActiveDates.value.length) return false
+  if (currentActiveDateIdx.value > 0) return true
+  return allActiveDates.value[0] < intradayDate.value
+})
+
+const hasNextActiveDate = computed(() => {
+  if (!allActiveDates.value.length) return false
+  if (currentActiveDateIdx.value !== -1 && currentActiveDateIdx.value < allActiveDates.value.length - 1) return true
+  return allActiveDates.value[allActiveDates.value.length - 1] > intradayDate.value
+})
+
+const intradayDateDisplay = computed(() => {
+  if (!intradayDate.value) return '选择日期'
+  const [y, m, d] = intradayDate.value.split('-').map(Number)
+  const today = getLocalTodayDate()
+  const suffix = intradayDate.value === today ? ' (今天)' : ''
+  return `${y}年${m}月${d}日${suffix}`
+})
+
+const intradayCountText = computed(() => {
+  const list = processedIntradayItems.value
+  const bgTotal = list.reduce((s, x) => s + x.bgCount, 0)
+  return `当日 ${list.length} 个时间节点 · 测糖 ${bgTotal} 次 ▼`
+})
+
+const stepIntradayDate = (dir: -1 | 1) => {
+  const dates = allActiveDates.value
+  if (!dates.length) return
+  const cur = intradayDate.value
+  if (dir === -1) {
+    const prevCandidates = dates.filter(d => d < cur)
+    if (prevCandidates.length > 0) {
+      intradayDate.value = prevCandidates[prevCandidates.length - 1]
+      onIntradayDateChanged()
+    } else {
+      showToastTip('已是最早有记录的日期')
+    }
+  } else {
+    const nextCandidates = dates.filter(d => d > cur)
+    if (nextCandidates.length > 0) {
+      intradayDate.value = nextCandidates[0]
+      onIntradayDateChanged()
+    } else {
+      showToastTip('已是最新有记录的日期')
+    }
+  }
+}
+
+const onIntradayDatePick = (e: any) => {
+  if (!e.detail?.value) return
+  intradayDate.value = e.detail.value
+  onIntradayDateChanged()
+}
+
+const onIntradayDateChanged = () => {
+  buildIntradayItems(intradayDate.value)
+  initPositionForCurrentTab()
+}
+
+const drillDownToIntraday = (dateKey: string) => {
+  if (!dateKey) return
+  intradayDate.value = dateKey
+  currentTab.value = 'intraday'
+  buildIntradayItems(dateKey)
+  initPositionForCurrentTab()
+  showToastTip(`已进入 ${dateKey} 日内曲线`)
+}
+
+// 获取各 Tab 缩放配置
 const getTabZoomLimits = () => {
+  if (currentTab.value === 'intraday') {
+    const total = Math.max(3, processedIntradayItems.value.length)
+    return { min: 3, max: Math.max(12, total), default: Math.min(6, Math.max(3, total)) }
+  }
   if (currentTab.value === 'week') {
     const total = Math.max(3, processedWeekItems.value.length)
-    return { min: 3, max: Math.max(16, total), default: 7 }
+    return { min: 3, max: Math.max(16, total), default: Math.min(7, Math.max(3, total)) }
   }
   if (currentTab.value === 'month') {
     const total = Math.max(3, processedMonthItems.value.length)
-    return { min: 3, max: Math.max(12, total), default: 6 }
+    return { min: 3, max: Math.max(12, total), default: Math.min(6, Math.max(3, total)) }
   }
-  // 'day'
   const total = Math.max(3, processedDayItems.value.length)
-  return { min: 3, max: Math.max(30, total), default: 7 }
+  return { min: 3, max: Math.max(30, total), default: Math.min(7, Math.max(3, total)) }
 }
 
-// 获取当前 Tab 下的完整数据集
-const getFullListForCurrentTab = () => {
+const getFullListForCurrentTab = (): ChartItem[] => {
+  if (currentTab.value === 'intraday') return processedIntradayItems.value
   if (currentTab.value === 'week') return processedWeekItems.value
   if (currentTab.value === 'month') return processedMonthItems.value
   return processedDayItems.value
 }
 
-// 计算全景模式下的阶梯天花板 (方案一阶梯自适应：25, 30, 35)
+// 最新记录锚点提示（当最新一条记录不是今天时提示用户，避免误解）
+const latestAnchorHint = computed(() => {
+  if (currentTab.value === 'intraday') return ''
+  if (!allActiveDates.value.length) return '暂无历史记录'
+  const latestKey = allActiveDates.value[allActiveDates.value.length - 1]
+  const today = getLocalTodayDate()
+  if (latestKey !== today) {
+    const [_, m, d] = latestKey.split('-').map(Number)
+    return `锚定最新记录: ${m}月${d}日`
+  }
+  return ''
+})
+
 const getPanoramaCeiling = () => {
   const fullList = getFullListForCurrentTab()
   let maxBg = 0
@@ -603,7 +1051,6 @@ const getPanoramaCeiling = () => {
   return Math.max(35, Math.ceil(maxBg / 5) * 5)
 }
 
-// 当前生效的血糖 Y 轴天花板
 const currentGlucoseCeiling = computed(() => {
   if (yAxisMode.value === 'panorama') {
     return getPanoramaCeiling()
@@ -611,13 +1058,11 @@ const currentGlucoseCeiling = computed(() => {
   return 20.0
 })
 
-// 检查当前数据集是否存在 > 20 的离群高值数据
 const hasOutlierInView = computed(() => {
   const fullList = getFullListForCurrentTab()
   return fullList.some(item => item.bg !== null && typeof item.bg === 'number' && item.bg > 20.0)
 })
 
-// 芯片展示文案 (确保无任何 emoji)
 const yAxisToggleLabel = computed(() => {
   if (yAxisMode.value === 'panorama') {
     return `全景 ${currentGlucoseCeiling.value}`
@@ -625,7 +1070,6 @@ const yAxisToggleLabel = computed(() => {
   return '聚焦 20'
 })
 
-// 切换聚焦 / 全景模式
 const toggleYAxisMode = () => {
   if (yAxisMode.value === 'focus') {
     yAxisMode.value = 'panorama'
@@ -634,46 +1078,9 @@ const toggleYAxisMode = () => {
     yAxisMode.value = 'focus'
     showToastTip('已切换至聚焦视窗 (0~20)')
   }
-  drawBothCharts()
+  drawMainAnalysisChart()
 }
 
-// 体重折叠与展开状态 (平常默认折叠收起，用户点击展开后再显示完整走势与图表)
-const isWeightExpanded = ref(false)
-
-const currentWeightCollapsedSubText = computed(() => {
-  if (isPointSelected.value) {
-    return `${selectedPoint.value.date} 体重记录`
-  }
-  return currentWeightRangeText.value || '当前区间'
-})
-
-// 切换体重折叠/展开状态
-const toggleWeightExpanded = () => {
-  isWeightExpanded.value = !isWeightExpanded.value
-  if (isWeightExpanded.value) {
-    showToastTip('已展开体重走势对比')
-    nextTick(() => {
-      setTimeout(() => {
-        initWeightCanvas(() => {
-          const fullList = getFullListForCurrentTab()
-          if (fullList.length) {
-            const { padLeft, padRight, spacing } = getPlotMetrics()
-            drawWeightChart(fullList, spacing, padLeft, padRight, scrollX)
-          }
-        })
-      }, 60)
-    })
-  } else {
-    showToastTip('已折叠体重对比')
-  }
-}
-
-// 获取当前 Tab 视窗展示的单元数量
-const getWindowSizeForCurrentTab = () => {
-  return currentZoomCount.value
-}
-
-// 当前视窗内可见数据切片 (根据连续平滑滚动 scrollX 动态映射)
 const currentDisplayItems = computed(() => {
   const fullList = getFullListForCurrentTab()
   if (!fullList.length) return []
@@ -687,28 +1094,57 @@ const isPointSelected = computed(() => {
   return selectedPointIndex.value >= 0 && selectedPointIndex.value < fullList.length
 })
 
-const selectedPoint = computed(() => {
+const selectedPoint = computed<ChartItem>(() => {
   if (isPointSelected.value) {
     return getFullListForCurrentTab()[selectedPointIndex.value]
   }
-  return { date: '', dayNum: '', bg: null, wt: null, bgCount: 0, wtCount: 0, timestamp: 0 }
+  return {
+    dateKey: '',
+    date: '',
+    dayNum: '',
+    bg: null,
+    bgCount: 0,
+    bgDetails: [],
+    wt: null,
+    wtCount: 0,
+    timestamp: 0,
+    overlay: createEmptyOverlay()
+  }
 })
 
-const selectedGlucoseTag = computed(() => {
-  if (!isPointSelected.value) return '平均'
+// 顶部标签文案：针对单次测量直接透出具体时效与时间，多次测量显示均值与次数
+const currentHeaderModeTag = computed(() => {
+  if (!isPointSelected.value) {
+    if (currentTab.value === 'intraday') return '当日均值'
+    if (currentTab.value === 'day' && selectedPeriodFilter.value !== 'all') {
+      return `${selectedPeriodFilter.value} · 区间均值`
+    }
+    return '区间平均'
+  }
   const pt = selectedPoint.value
-  if (currentTab.value === 'day' && pt.bgCount > 1) {
-    return `${pt.date} 当日均值 (测${pt.bgCount}次)`
+  if (currentTab.value === 'intraday') {
+    return `${pt.dayNum} · ${pt.singlePeriod || '实测'}`
+  }
+  if (currentTab.value === 'day') {
+    if (pt.bgCount === 1) {
+      return `${pt.date} · ${pt.singlePeriod || '单次'} (${pt.singleTime || ''})`.trim()
+    }
+    if (pt.bgCount > 1) {
+      return `${pt.date} 当日均值 (测${pt.bgCount}次)`
+    }
   }
   return `${pt.date}`
 })
 
-const selectedWeightTag = computed(() => {
-  if (!isPointSelected.value) return '平均'
-  return `${selectedPoint.value.date}`
+const selectedDayMinMaxText = computed(() => {
+  if (!isPointSelected.value) return ''
+  const pt = selectedPoint.value
+  if (pt.bgCount > 1 && pt.bgMin !== null && pt.bgMax !== null && pt.bgMin !== undefined && pt.bgMax !== undefined) {
+    return `波动 ${pt.bgMin.toFixed(1)} ~ ${pt.bgMax.toFixed(1)}`
+  }
+  return ''
 })
 
-// 血糖值展示
 const hasGlucoseValue = computed(() => {
   if (isPointSelected.value) {
     return selectedPoint.value.bg !== null && typeof selectedPoint.value.bg === 'number'
@@ -719,7 +1155,7 @@ const hasGlucoseValue = computed(() => {
 const currentGlucoseDisplay = computed(() => {
   if (isPointSelected.value) {
     if (selectedPoint.value.bg !== null && typeof selectedPoint.value.bg === 'number') {
-      return (selectedPoint.value.bg).toFixed(1)
+      return selectedPoint.value.bg.toFixed(1)
     }
     return '--'
   }
@@ -729,61 +1165,26 @@ const currentGlucoseDisplay = computed(() => {
   return (sum / valid.length).toFixed(1)
 })
 
-// 体重值展示与有效性计算
-const hasWeightValue = computed(() => {
-  if (isPointSelected.value) {
-    return selectedPoint.value.wt !== null && typeof selectedPoint.value.wt === 'number'
-  }
-  return currentDisplayItems.value.some(i => i.wt !== null && typeof i.wt === 'number')
-})
-
-const currentWeightValueDisplay = computed(() => {
-  if (isPointSelected.value) {
-    if (selectedPoint.value.wt !== null && typeof selectedPoint.value.wt === 'number') {
-      return (selectedPoint.value.wt).toFixed(2)
-    }
-    return '--'
-  }
-  const validItems = currentDisplayItems.value.filter(i => i.wt !== null && typeof i.wt === 'number' && (i.wt as number) > 0)
-  if (!validItems.length) return '--'
-  const sum = validItems.reduce((a, b) => a + (b.wt as number), 0)
-  return (sum / validItems.length).toFixed(2)
-})
-
 const currentGlucoseRangeText = computed(() => {
+  if (currentTab.value === 'intraday') {
+    return `${intradayDateDisplay.value} 日内曲线`
+  }
   const items = currentDisplayItems.value
   if (isPointSelected.value) {
-    return selectedPoint.value.date + ' 明细'
+    return `${selectedPoint.value.date} 节点明细`
   }
-  if (!items.length) return ''
-  return `${items[0].date} 至 ${items[items.length - 1].date}`
-})
-
-const currentWeightRangeText = computed(() => {
-  return currentGlucoseRangeText.value
+  if (!items.length) return '暂无匹配记录'
+  if (items.length === 1) return `${items[0].date} 单日记录`
+  return `${items[0].date} 至 ${items[items.length - 1].date} (共${items.length}个记录节点)`
 })
 
 const getStatusMeta = (bg: number) => {
-  const min = props.targetMin || 4.0
-  const max = props.targetMax || 15.0
-  const warningMax = max * 1.3
-
-  if (bg <= 0) {
-    return { color: '#94A3B8', text: '无数据', badgeClass: 'badge-gray' }
-  } else if (bg < min) {
-    return { color: '#DC2626', text: '低血糖', badgeClass: 'badge-red' }
-  } else if (bg <= max) {
-    return { color: '#16A34A', text: '达标', badgeClass: 'badge-green' }
-  } else if (bg <= warningMax) {
-    return { color: '#CA8A04', text: '偏高', badgeClass: 'badge-yellow' }
-  } else {
-    return { color: '#DC2626', text: '危险过高', badgeClass: 'badge-red' }
-  }
+  return evaluateGlucoseStatus(bg, props.targetMin, props.targetMax)
 }
 
 const glucoseStatusText = computed(() => {
   const bg = isPointSelected.value ? selectedPoint.value.bg : parseFloat(currentGlucoseDisplay.value)
-  if (bg === null || isNaN(bg)) return '未记录'
+  if (bg === null || isNaN(bg)) return '无血糖记录'
   return getStatusMeta(bg).text
 })
 
@@ -793,31 +1194,117 @@ const glucoseStatusClass = computed(() => {
   return getStatusMeta(bg).badgeClass
 })
 
+// 底部选中节点/日内事件详情摘要卡
+const detailPanelTitle = computed(() => {
+  if (isPointSelected.value) {
+    return `${selectedPoint.value.date} 节点详情`
+  }
+  if (currentTab.value === 'intraday') {
+    return `${intradayDateDisplay.value} 全天记录明细`
+  }
+  return ''
+})
+
+const detailPanelItems = computed(() => {
+  const list: Array<{ badge: string; main: string; sub?: string; typeClass: string }> = []
+  let targetItems: ChartItem[] = []
+
+  if (isPointSelected.value) {
+    targetItems = [selectedPoint.value]
+  } else if (currentTab.value === 'intraday') {
+    targetItems = processedIntradayItems.value
+  } else {
+    return list
+  }
+
+  targetItems.forEach(pt => {
+    pt.bgDetails.forEach(bgItem => {
+      list.push({
+        badge: `血糖 ${bgItem.time}`,
+        main: `${bgItem.val.toFixed(1)} mmol/L`,
+        sub: bgItem.period + (bgItem.note ? ` · ${bgItem.note}` : ''),
+        typeClass: 'di-glucose'
+      })
+    })
+    if (overlays.value.insulin) {
+      pt.overlay.insulinList.forEach(ins => {
+        list.push({
+          badge: `打针 ${ins.time}`,
+          main: `${ins.dose} U`,
+          sub: `${ins.period} · ${ins.type.split(' ')[0]}`,
+          typeClass: 'di-insulin'
+        })
+      })
+    }
+    if (overlays.value.meal) {
+      pt.overlay.mealList.forEach(m => {
+        list.push({
+          badge: `饮食 ${m.time}`,
+          main: `${m.grams} g`,
+          sub: `${m.period}${m.brand ? ' · ' + m.brand : ''}`,
+          typeClass: 'di-meal'
+        })
+      })
+    }
+    if (overlays.value.excretion) {
+      pt.overlay.excretionList.forEach(ex => {
+        list.push({
+          badge: `排泄 ${ex.time}`,
+          main: ex.urine,
+          sub: ex.stool || '',
+          typeClass: 'di-excretion'
+        })
+      })
+    }
+    if (overlays.value.weight) {
+      pt.overlay.weightList.forEach(w => {
+        list.push({
+          badge: `称重 ${w.time}`,
+          main: `${w.weight.toFixed(2)} kg`,
+          sub: '',
+          typeClass: 'di-weight'
+        })
+      })
+    }
+  })
+
+  return list
+})
+
 // ========================================================
-// 连续平滑像素级滚动与惯性物理引擎 (完美复刻首页 u-charts 丝滑手感)
+// 连续平滑像素级滚动与分层无遮挡 Canvas 渲染引擎
 // ========================================================
 let scrollX = 0
 
 const getPlotMetrics = () => {
   const padLeft = 38
-  const padRight = canvasWidth - 26
-  const plotWidth = padRight - padLeft
-  const winSize = currentZoomCount.value
-  const spacing = plotWidth / (winSize - 1 || 1)
+  const padRight = canvasWidth - 24
+  const plotWidth = Math.max(10, padRight - padLeft)
+  const fullLen = getFullListForCurrentTab().length
+  const winSize = fullLen === 1 ? 1 : currentZoomCount.value
+  const spacing = winSize <= 1 ? plotWidth : plotWidth / (winSize - 1)
   return { padLeft, padRight, plotWidth, winSize, spacing }
 }
 
 const getMinScrollX = () => {
   const fullList = getFullListForCurrentTab()
-  const { plotWidth, winSize, spacing } = getPlotMetrics()
-  if (fullList.length <= winSize) return 0
+  const { winSize, spacing } = getPlotMetrics()
+  if (fullList.length <= winSize || winSize <= 1) return 0
   return - (fullList.length - winSize) * spacing
 }
 
-// 根据当前连续 scrollX 动态更新可见区间索引（仅在跨越数据点时触发响应式更新，保障 60fps 零桥接负担）
 const updateVisibleMetrics = () => {
   const fullList = getFullListForCurrentTab()
-  if (!fullList.length) return
+  if (!fullList.length) {
+    visibleStartIndex.value = 0
+    visibleEndIndex.value = 0
+    return
+  }
+  if (fullList.length === 1) {
+    visibleStartIndex.value = 0
+    visibleEndIndex.value = 0
+    return
+  }
   const { plotWidth, spacing } = getPlotMetrics()
 
   const startIdx = Math.max(0, Math.min(fullList.length - 1, Math.floor((-scrollX + 6) / spacing)))
@@ -829,66 +1316,58 @@ const updateVisibleMetrics = () => {
   }
 }
 
-// 初始化图表视窗位置 (默认对齐至最新数据端，与首页 u-charts scrollAlign: 'right' 保持完全一致)
 const initPositionForCurrentTab = () => {
-  const fullList = getFullListForCurrentTab()
   const limits = getTabZoomLimits()
   currentZoomCount.value = limits.default
   scrollX = getMinScrollX()
   selectedPointIndex.value = -1
-  if (currentTab.value === 'day' && currentZoomCount.value === 7) {
+  if (currentTab.value === 'day') {
     currentQuickRange.value = '7d'
-  } else {
+  } else if (currentTab.value === 'intraday') {
     currentQuickRange.value = ''
   }
   updateVisibleMetrics()
-  drawBothCharts()
+  drawMainAnalysisChart()
 }
 
-// 快速血糖趋势分析快捷缩放与定位 [ 近7天 | 近14天 | 近30天 | 全部 ]
 const applyQuickRange = (range: '7d' | '14d' | '30d' | 'all') => {
   gestures.stopAnimation()
 
   currentQuickRange.value = range
   selectedPointIndex.value = -1
+  const fullList = getFullListForCurrentTab()
+  const total = Math.max(3, fullList.length)
 
   if (range === '7d') {
-    if (currentTab.value !== 'day') currentTab.value = 'day'
-    currentZoomCount.value = 7
+    currentZoomCount.value = Math.min(7, total)
     scrollX = getMinScrollX()
-    showToastTip('已切换至近7天走势')
+    showToastTip('已切换至近7期有效记录')
   } else if (range === '14d') {
-    if (currentTab.value !== 'day') currentTab.value = 'day'
-    currentZoomCount.value = 14
+    currentZoomCount.value = Math.min(14, total)
     scrollX = getMinScrollX()
-    showToastTip('已切换至近14天走势')
+    showToastTip('已切换至近14期有效记录')
   } else if (range === '30d') {
-    if (currentTab.value !== 'day') currentTab.value = 'day'
-    currentZoomCount.value = 30
+    currentZoomCount.value = Math.min(30, total)
     scrollX = getMinScrollX()
-    showToastTip('已切换至近30天走势')
+    showToastTip('已切换至近30期有效记录')
   } else if (range === 'all') {
-    const fullList = getFullListForCurrentTab()
-    const total = Math.max(3, fullList.length)
     currentZoomCount.value = total
     scrollX = 0
-    showToastTip('已展示全部历史走势')
+    showToastTip('已展示全部有效记录走势')
   }
 
   updateVisibleMetrics()
-  drawBothCharts()
+  drawMainAnalysisChart()
 }
 
-// 初始化血糖画布
 const initGlucoseCanvas = (callback?: () => void) => {
   const query = uni.createSelectorQuery().in(instance?.proxy || instance)
-  query.select('#glucoseFsCanvas').fields({ node: true, size: true, rect: true })
+  query.select('#glucoseFsCanvas').fields({ node: true, size: true, rect: true }, () => {})
   query.select('.fs-canvas-box').boundingClientRect()
   query.exec((res) => {
     if (res && res[0] && res[0].node) {
       const dpr = uni.getSystemInfoSync().pixelRatio || 2
 
-      // 血糖画布
       glucoseCanvasNode = res[0].node
       glucoseCtx = glucoseCanvasNode.getContext('2d')
       canvasWidth = res[0].width
@@ -908,96 +1387,91 @@ const initGlucoseCanvas = (callback?: () => void) => {
   })
 }
 
-// 初始化体重画布 (仅在展开且存在对应 DOM 时动态初始化并绘制)
-const initWeightCanvas = (callback?: () => void) => {
-  if (!isWeightExpanded.value) return
-  const query = uni.createSelectorQuery().in(instance?.proxy || instance)
-  query.select('#weightFsCanvas').fields({ node: true, size: true, rect: true })
-  query.exec((res) => {
-    if (res && res[0] && res[0].node) {
-      const dpr = uni.getSystemInfoSync().pixelRatio || 2
-
-      // 体重画布
-      weightCanvasNode = res[0].node
-      weightCtx = weightCanvasNode.getContext('2d')
-      weightCanvasHeight = res[0].height
-      weightCanvasNode.width = canvasWidth * dpr
-      weightCanvasNode.height = weightCanvasHeight * dpr
-      weightCtx.scale(dpr, dpr)
-
-      if (callback) callback()
-    }
-  })
-}
-
-// 主初始化入口
-const initCanvases = () => {
-  initGlucoseCanvas(() => {
-    initPositionForCurrentTab()
-    if (isWeightExpanded.value) {
-      initWeightCanvas(() => {
-        drawBothCharts()
-      })
-    }
-  })
-}
-
-// 同步绘制双图表 (由 Canvas 2D 毫秒级直接渲染，连续滑动 60fps 丝滑不掉帧)
-const drawBothCharts = () => {
-  if (!glucoseCtx) return
-  const fullList = getFullListForCurrentTab()
-  if (!fullList.length) return
-
-  const { padLeft, padRight, spacing } = getPlotMetrics()
-
-  // 1. 绘制血糖图
-  drawGlucoseChart(fullList, spacing, padLeft, padRight, scrollX)
-
-  // 2. 绘制体重图 (仅在展开状态下绘制)
-  if (isWeightExpanded.value && weightCtx) {
-    drawWeightChart(fullList, spacing, padLeft, padRight, scrollX)
-  }
-}
-
-// 血糖图表：支持连续亚像素级平滑拖拽与边界无缝剪裁
-const drawGlucoseChart = (
-  items: ChartItem[], 
-  spacing: number, 
-  padLeft: number, 
-  padRight: number, 
-  curScrollX: number
+// 绘制圆角微胶囊背景辅助函数
+const drawRoundedBadge = (
+  ctx: any,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+  bgColor: string,
+  borderColor: string
 ) => {
+  const left = x - w / 2
+  const top = y - h / 2
+  ctx.beginPath()
+  ctx.moveTo(left + r, top)
+  ctx.lineTo(left + w - r, top)
+  ctx.quadraticCurveTo(left + w, top, left + w, top + r)
+  ctx.lineTo(left + w, top + h - r)
+  ctx.quadraticCurveTo(left + w, top + h, left + w - r, top + h)
+  ctx.lineTo(left + r, top + h)
+  ctx.quadraticCurveTo(left, top + h, left, top + h - r)
+  ctx.lineTo(left, top + r)
+  ctx.quadraticCurveTo(left, top, left + r, top)
+  ctx.closePath()
+  ctx.fillStyle = bgColor
+  ctx.fill()
+  ctx.lineWidth = 1
+  ctx.strokeStyle = borderColor
+  ctx.stroke()
+}
+
+// 核心分层渲染函数：严格隔离【血糖折线区】、【底部多维事件泳道】与【X轴刻度区】，彻底杜绝文字重叠或遮挡
+const drawMainAnalysisChart = () => {
+  if (!glucoseCtx) return
   const ctx = glucoseCtx
+  const items = getFullListForCurrentTab()
+
   ctx.clearRect(0, 0, canvasWidth, glucoseCanvasHeight)
   ctx.fillStyle = '#FFFFFF'
   ctx.fillRect(0, 0, canvasWidth, glucoseCanvasHeight)
 
-  const topY = 24
-  const bottomY = glucoseCanvasHeight - 25
-
-  const ceiling = currentGlucoseCeiling.value
-
-  // 血糖动态标尺 (聚焦模式 0~20，全景模式阶梯 25/30/35)
-  const getY = (bg: number) => {
-    const clamped = Math.max(0, Math.min(ceiling, bg))
-    return bottomY - (clamped / ceiling) * (bottomY - topY)
+  if (!items.length) {
+    ctx.fillStyle = '#94A3B8'
+    ctx.font = '13px sans-serif'
+    ctx.textAlign = 'center'
+    const emptyMsg = currentTab.value === 'intraday'
+      ? '该日期暂无记录，请点击上方切换上一记录日'
+      : '暂无符合条件的历史记录'
+    ctx.fillText(emptyMsg, canvasWidth / 2, glucoseCanvasHeight / 2)
+    return
   }
 
-  // 1. 绘制固定网格虚线与 Y 轴刻度 (外框与刻度绝对静止)
+  const { padLeft, padRight, plotWidth, spacing } = getPlotMetrics()
+  const activeKeys = activeOverlayKeys.value
+  const laneRowHeight = 16
+  const eventLaneHeight = activeKeys.length > 0 ? activeKeys.length * laneRowHeight + 10 : 0
+
+  const topY = 26
+  const axisY = glucoseCanvasHeight - 24
+  const glucoseBottomY = axisY - eventLaneHeight
+
+  const ceiling = currentGlucoseCeiling.value
+  const getY = (bg: number) => {
+    const clamped = Math.max(0, Math.min(ceiling, bg))
+    return glucoseBottomY - (clamped / ceiling) * (glucoseBottomY - topY)
+  }
+
+  const getItemX = (index: number) => {
+    if (items.length === 1) {
+      return padLeft + plotWidth / 2
+    }
+    return padLeft + index * spacing + scrollX
+  }
+
+  // 1. 绘制血糖区固定网格虚线与 Y 轴刻度
   ctx.lineWidth = 1
   ctx.setLineDash([3, 3])
   ctx.strokeStyle = '#E2E8F0'
 
   let gridSteps: number[] = []
-  if (ceiling === 20) {
-    gridSteps = [20, 15, 10, 5]
-  } else if (ceiling === 25) {
-    gridSteps = [25, 20, 15, 10, 5]
-  } else if (ceiling === 30) {
-    gridSteps = [30, 20, 10]
-  } else if (ceiling === 35) {
-    gridSteps = [35, 25, 15, 5]
-  } else {
+  if (ceiling === 20) gridSteps = [20, 15, 10, 5]
+  else if (ceiling === 25) gridSteps = [25, 20, 15, 10, 5]
+  else if (ceiling === 30) gridSteps = [30, 20, 10]
+  else if (ceiling === 35) gridSteps = [35, 25, 15, 5]
+  else {
     const step = Math.ceil(ceiling / 4)
     gridSteps = [ceiling, step * 3, step * 2, step]
   }
@@ -1015,85 +1489,119 @@ const drawGlucoseChart = (
     ctx.fillText(`${v}`, padLeft - 6, y + 3)
   })
 
-  // 0 刻度实线
+  // 血糖 0 刻度分界线
   ctx.setLineDash([])
   ctx.strokeStyle = '#CBD5E1'
   ctx.beginPath()
-  ctx.moveTo(padLeft, bottomY)
-  ctx.lineTo(padRight, bottomY)
+  ctx.moveTo(padLeft, glucoseBottomY)
+  ctx.lineTo(padRight, glucoseBottomY)
   ctx.stroke()
-  ctx.fillText('0', padLeft - 6, bottomY + 3)
+  ctx.fillStyle = '#94A3B8'
+  ctx.font = '10px sans-serif'
+  ctx.textAlign = 'right'
+  ctx.fillText('0', padLeft - 6, glucoseBottomY + 3)
 
-  // 参考线 15.0 与 4.0
-  const y15 = getY(props.targetMax || 15.0)
+  // 若开启了多维事件泳道，绘制泳道浅底色与左侧泳道标题
+  if (activeKeys.length > 0) {
+    ctx.fillStyle = '#F8FAFC'
+    ctx.fillRect(padLeft, glucoseBottomY + 1, canvasWidth - padLeft - 4, eventLaneHeight - 2)
+
+    ctx.strokeStyle = '#E2E8F0'
+    ctx.beginPath()
+    ctx.moveTo(padLeft, axisY)
+    ctx.lineTo(padRight, axisY)
+    ctx.stroke()
+
+    const keyLabelMap: Record<string, { label: string; color: string }> = {
+      insulin: { label: '针', color: '#EA580C' },
+      meal: { label: '食', color: '#D97706' },
+      excretion: { label: '排', color: '#0D9488' },
+      weight: { label: '重', color: '#2563EB' }
+    }
+    activeKeys.forEach((k, kIdx) => {
+      const rowCenterY = glucoseBottomY + 6 + kIdx * laneRowHeight + laneRowHeight / 2
+      ctx.fillStyle = keyLabelMap[k].color
+      ctx.font = 'bold 9.5px sans-serif'
+      ctx.textAlign = 'right'
+      ctx.fillText(keyLabelMap[k].label, padLeft - 6, rowCenterY + 3)
+    })
+  }
+
+  // 目标安全区间参考线
+  const { min: targetMin, max: targetMax } = normalizeTargetRange(props.targetMin, props.targetMax)
+  const yMax = getY(targetMax)
   ctx.setLineDash([4, 2])
   ctx.strokeStyle = '#FCA5A5'
   ctx.beginPath()
-  ctx.moveTo(padLeft, y15)
-  ctx.lineTo(padRight, y15)
+  ctx.moveTo(padLeft, yMax)
+  ctx.lineTo(padRight, yMax)
   ctx.stroke()
 
-  const y4 = getY(props.targetMin || 4.0)
+  const yMin = getY(targetMin)
   ctx.strokeStyle = '#86EFAC'
   ctx.beginPath()
-  ctx.moveTo(padLeft, y4)
-  ctx.lineTo(padRight, y4)
+  ctx.moveTo(padLeft, yMin)
+  ctx.lineTo(padRight, yMin)
   ctx.stroke()
   ctx.setLineDash([])
 
-  // 2. 剪裁区域内连续平滑绘制折线、数据点与高亮柱 (左侧严格保护Y轴刻度，右侧充足留白至画布边缘彻底杜绝最新数据点与数值被截断)
+  // 2. 剪裁区域：绘制选中光柱、血糖折线（含跨3天断更虚线）、数据点与底部事件泳道徽章
   ctx.save()
   ctx.beginPath()
-  ctx.rect(padLeft - 4, 2, canvasWidth - (padLeft - 4) - 2, bottomY - 2 + 6)
+  ctx.rect(padLeft - 4, 2, canvasWidth - (padLeft - 4) - 2, axisY - 2 + 4)
   ctx.clip()
 
-  // 竖向选中高亮柱 (跟随数据点连续物理位置实时对齐)
   if (selectedPointIndex.value !== -1 && selectedPointIndex.value < items.length) {
-    const selX = padLeft + selectedPointIndex.value * spacing + curScrollX
-    const beamW = currentZoomCount.value <= 4 ? 42 : (currentZoomCount.value <= 8 ? 28 : 16)
-    ctx.fillStyle = 'rgba(59, 130, 246, 0.08)'
-    ctx.fillRect(selX - beamW / 2, topY - 5, beamW, bottomY - topY + 10)
-
-    ctx.setLineDash([3, 3])
-    ctx.strokeStyle = 'rgba(59, 130, 246, 0.5)'
-    ctx.beginPath()
-    ctx.moveTo(selX, topY - 5)
-    ctx.lineTo(selX, bottomY)
-    ctx.stroke()
-    ctx.setLineDash([])
+    const selX = getItemX(selectedPointIndex.value)
+    const beamW = currentZoomCount.value <= 4 ? 40 : (currentZoomCount.value <= 8 ? 26 : 16)
+    drawSelectionBeam(ctx, selX, topY, axisY, beamW)
   }
 
-  // 绘制血糖连续平滑折线 (由 clip 裁切，天然无缝穿过视窗两端)
-  const validPoints: { x: number, y: number }[] = []
+  // 收集有效血糖点并分段绘制（当相邻两个有效记录日间隔 > 3 天时，使用虚线连接提示间隔期）
+  const validBgNodes: { x: number; y: number; ts: number }[] = []
   items.forEach((item, i) => {
     if (item.bg !== null && typeof item.bg === 'number' && item.bg > 0) {
-      const x = padLeft + i * spacing + curScrollX
-      validPoints.push({ x, y: getY(item.bg) })
+      validBgNodes.push({
+        x: getItemX(i),
+        y: getY(item.bg),
+        ts: item.timestamp
+      })
     }
   })
 
-  if (validPoints.length > 0) {
-    ctx.beginPath()
-    ctx.strokeStyle = '#64748B'
-    ctx.lineWidth = currentZoomCount.value <= 4 ? 2.8 : 2
+  if (validBgNodes.length >= 2) {
+    ctx.lineWidth = currentZoomCount.value <= 4 ? 2.6 : 2.0
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
+    const THREE_DAYS_MS = 3.5 * 24 * 3600 * 1000
 
-    ctx.moveTo(validPoints[0].x, validPoints[0].y)
-    for (let j = 1; j < validPoints.length; j++) {
-      ctx.lineTo(validPoints[j].x, validPoints[j].y)
+    for (let j = 0; j < validBgNodes.length - 1; j++) {
+      const p1 = validBgNodes[j]
+      const p2 = validBgNodes[j + 1]
+      const isLongGap = currentTab.value === 'day' && (p2.ts - p1.ts > THREE_DAYS_MS)
+      ctx.beginPath()
+      if (isLongGap) {
+        ctx.setLineDash([4, 4])
+        ctx.strokeStyle = '#94A3B8'
+      } else {
+        ctx.setLineDash([])
+        ctx.strokeStyle = '#64748B'
+      }
+      ctx.moveTo(p1.x, p1.y)
+      ctx.lineTo(p2.x, p2.y)
+      ctx.stroke()
     }
-    ctx.stroke()
+    ctx.setLineDash([])
   }
 
-  // 绘制数据点与数字（放大到3-4份时采用更醒目的尺寸与字号）
-  const showNumbers = currentZoomCount.value <= 8
-  const dotR = currentZoomCount.value <= 4 ? 5.5 : (currentZoomCount.value <= 8 ? 4 : 2.8)
-  const fontStyle = currentZoomCount.value <= 4 ? 'bold 12.5px sans-serif' : 'bold 10.5px sans-serif'
+  // 绘制血糖圆点与防碰撞数值标签
+  const showNumbers = currentZoomCount.value <= 10 || items.length <= 10
+  const dotR = currentZoomCount.value <= 4 ? 5.2 : (currentZoomCount.value <= 8 ? 4.0 : 2.8)
+  const fontStyle = currentZoomCount.value <= 4 ? 'bold 12px sans-serif' : 'bold 10.5px sans-serif'
+  let lastBgLabelRightX = -999
 
   items.forEach((item, i) => {
-    const x = padLeft + i * spacing + curScrollX
-    // 仅绘制视窗附近的可见点，大幅优化绘制效率
+    const x = getItemX(i)
     if (x < padLeft - 30 || x > padRight + 30) return
 
     if (item.bg !== null && typeof item.bg === 'number' && item.bg > 0) {
@@ -1101,7 +1609,6 @@ const drawGlucoseChart = (
       const y = getY(item.bg)
       const meta = getStatusMeta(item.bg)
 
-      // 圆点 (离群点醒目红标打顶)
       ctx.beginPath()
       ctx.arc(x, y, dotR, 0, Math.PI * 2)
       ctx.fillStyle = isOutlier ? '#DC2626' : meta.color
@@ -1110,287 +1617,100 @@ const drawGlucoseChart = (
       ctx.strokeStyle = '#FFFFFF'
       ctx.stroke()
 
-      // 空间足够时展示数值数字 (智能边界防截断保护)
-      if (showNumbers) {
-        ctx.fillStyle = isOutlier ? '#DC2626' : meta.color
+      const isSelected = selectedPointIndex.value === i
+      if (showNumbers || isSelected) {
+        const textStr = isOutlier ? `▲${item.bg.toFixed(1)}` : item.bg.toFixed(1)
         ctx.font = fontStyle
-        const textStr = isOutlier ? `▲${item.bg}` : `${item.bg}`
-        const numW = (ctx.measureText ? ctx.measureText(textStr).width : 0) || 24
-        const halfNumW = numW / 2
+        const estW = (ctx.measureText ? ctx.measureText(textStr).width : 24) + 6
 
-        let drawNumX = x
-        const safeTextLeft = padLeft - 2 + halfNumW
-        const safeTextRight = canvasWidth - 4 - halfNumW
-        if (drawNumX < safeTextLeft && x >= padLeft - 6) {
-          drawNumX = safeTextLeft
-        } else if (drawNumX > safeTextRight && x <= padRight + 10) {
-          drawNumX = safeTextRight
+        // 水平防重叠保护：仅在空间充足或为当前选中点时绘制数值文字
+        if (isSelected || x - estW / 2 > lastBgLabelRightX) {
+          const textY = isOutlier
+            ? Math.min(glucoseBottomY - 6, y + dotR + 11)
+            : Math.max(15, y - (currentZoomCount.value <= 4 ? 8 : 6))
+          drawClampedPointLabel(
+            ctx,
+            textStr,
+            x,
+            textY,
+            padLeft,
+            padRight,
+            canvasWidth,
+            isOutlier ? '#DC2626' : meta.color,
+            fontStyle
+          )
+          lastBgLabelRightX = x + estW / 2
         }
-
-        const textY = isOutlier ? (y + dotR + 10) : (y - (currentZoomCount.value <= 4 ? 9 : 7))
-        ctx.textAlign = 'center'
-        ctx.fillText(textStr, drawNumX, textY)
       }
     }
   })
 
-  ctx.restore()
-
-  // 3. 独立绘制 X 轴日期刻度 (智能防截断坐标定位：首尾两端日期刻度自动平移贴合安全可视区，永不溢出裁切)
-  items.forEach((item, i) => {
-    const x = padLeft + i * spacing + curScrollX
-    if (x < padLeft - 35 || x > padRight + 35) return
-
-    let showX = true
-    const isMonthBoundary = item.dayNum.includes('/')
-    if (currentZoomCount.value > 20) {
-      showX = (i === 0 || (i + 1) % 5 === 1 || i === items.length - 1 || isMonthBoundary)
-    } else if (currentZoomCount.value > 12) {
-      showX = (i === 0 || i % 2 === 0 || i === items.length - 1 || isMonthBoundary)
-    } else {
-      showX = true
+  // 绘制底部独立事件泳道中的多维事件徽章（每类事件独占一行泳道 + 水平防碰撞，绝对不遮挡折线或彼此重叠）
+  if (activeKeys.length > 0) {
+    const styleMap: Record<string, { bg: string; border: string; text: string }> = {
+      insulin: { bg: '#FFF7ED', border: '#FDBA74', text: '#C2410C' },
+      meal: { bg: '#FFFBEB', border: '#FDE68A', text: '#B45309' },
+      excretion: { bg: '#F0FDFA', border: '#99F6E4', text: '#0F766E' },
+      weight: { bg: '#EFF6FF', border: '#BFDBFE', text: '#1D4ED8' }
     }
 
-    if (showX) {
-      const isCur = selectedPointIndex.value === i
-      ctx.fillStyle = isCur ? '#0F172A' : (currentZoomCount.value <= 4 ? '#475569' : '#64748B')
-      ctx.font = isCur ? 'bold 11px sans-serif' : (currentZoomCount.value <= 4 ? '11px sans-serif' : '10px sans-serif')
+    activeKeys.forEach((k, kIdx) => {
+      const rowCenterY = glucoseBottomY + 6 + kIdx * laneRowHeight + laneRowHeight / 2
+      let lastBadgeRightX = padLeft - 4
 
-      const textW = (ctx.measureText ? ctx.measureText(item.dayNum).width : 0) || 28
-      const halfW = textW / 2
-      let drawX = x
-      const safeLeft = padLeft - 2
-      const safeRight = canvasWidth - 6
-      if (drawX - halfW < safeLeft) {
-        drawX = safeLeft + halfW
-      } else if (drawX + halfW > safeRight) {
-        drawX = safeRight - halfW
-      }
+      items.forEach((item, i) => {
+        const x = getItemX(i)
+        if (x < padLeft - 20 || x > padRight + 20) return
 
-      ctx.textAlign = 'center'
-      ctx.fillText(item.dayNum, drawX, bottomY + 16)
-    }
-  })
-}
+        let badgeText = ''
+        if (k === 'insulin' && item.overlay.insulinText) badgeText = item.overlay.insulinText
+        else if (k === 'meal' && item.overlay.mealText) badgeText = item.overlay.mealText
+        else if (k === 'excretion' && item.overlay.excretionText) badgeText = item.overlay.excretionText
+        else if (k === 'weight' && item.overlay.weightText) badgeText = item.overlay.weightText
 
-// 体重图表：同比例尺连续滑动渲染
-const drawWeightChart = (
-  items: ChartItem[], 
-  spacing: number, 
-  padLeft: number, 
-  padRight: number, 
-  curScrollX: number
-) => {
-  const ctx = weightCtx
-  ctx.clearRect(0, 0, canvasWidth, weightCanvasHeight)
-  ctx.fillStyle = '#FFFFFF'
-  ctx.fillRect(0, 0, canvasWidth, weightCanvasHeight)
+        if (!badgeText) return
 
-  const topY = 24
-  const bottomY = weightCanvasHeight - 22
+        const st = styleMap[k]
+        ctx.font = 'bold 9px sans-serif'
+        const tw = (ctx.measureText ? ctx.measureText(badgeText).width : 22) + 8
+        const isSelected = selectedPointIndex.value === i
 
-  // 收集当前系列所有有效体重数据
-  const validWts = items
-    .filter(i => typeof i.wt === 'number' && (i.wt as number) > 0)
-    .map(i => i.wt as number)
-
-  // 智能计算自适应体重标尺 (默认生理黄金区间 3.0 ~ 6.0 kg，超限自动弹性拓展)
-  let minWeight = 3.0
-  let maxWeight = 6.0
-
-  if (validWts.length > 0) {
-    const dataMin = Math.min(...validWts)
-    const dataMax = Math.max(...validWts)
-
-    // 保证高于最大数据点至少 0.8~1.0kg 空间，彻底杜绝压顶现象
-    if (dataMax > 5.2) {
-      maxWeight = Math.ceil((dataMax + 0.8) * 2) / 2
-    } else {
-      maxWeight = 6.0
-    }
-
-    if (dataMin < 3.0) {
-      minWeight = Math.max(0, Math.floor((dataMin - 0.8) * 2) / 2)
-    } else if (dataMin >= 5.0 && minWeight === 3.0) {
-      minWeight = Math.floor((dataMin - 0.8) * 2) / 2
-    }
-  }
-
-  // 保证至少有 2.0kg 纵向视窗跨度，防止 50g 正常微小波动呈现“过山车”视觉畸变
-  if (maxWeight - minWeight < 2.0) {
-    const mid = (maxWeight + minWeight) / 2
-    minWeight = Math.max(0, Math.floor((mid - 1.0) * 2) / 2)
-    maxWeight = minWeight + 2.0
-  }
-
-  const weightSpan = maxWeight - minWeight
-
-  const getY = (wt: number) => {
-    const clamped = Math.max(minWeight, Math.min(maxWeight, wt))
-    return bottomY - ((clamped - minWeight) / weightSpan) * (bottomY - topY)
-  }
-
-  // 1. 固定网格线与 Y 轴刻度
-  ctx.lineWidth = 1
-  ctx.setLineDash([3, 3])
-  ctx.strokeStyle = '#E2E8F0'
-
-  // 动态生成中间参考刻度线
-  const midWeight = Number(((minWeight + maxWeight) / 2).toFixed(1))
-  const gridSteps = [maxWeight, midWeight]
-
-  gridSteps.forEach(v => {
-    const y = getY(v)
-    ctx.beginPath()
-    ctx.moveTo(padLeft, y)
-    ctx.lineTo(padRight, y)
-    ctx.stroke()
-
-    ctx.fillStyle = '#94A3B8'
-    ctx.font = '9px sans-serif'
-    ctx.textAlign = 'right'
-    ctx.fillText(v.toFixed(1), padLeft - 6, y + 3)
-  })
-
-  // 3.0 基线
-  ctx.setLineDash([])
-  ctx.strokeStyle = '#CBD5E1'
-  ctx.beginPath()
-  ctx.moveTo(padLeft, bottomY)
-  ctx.lineTo(padRight, bottomY)
-  ctx.stroke()
-  ctx.fillText(minWeight.toFixed(1), padLeft - 6, bottomY + 3)
-
-  // 2. 剪裁区域内连续滑动绘制 (左侧严格保护Y轴刻度，右侧充足留白至画布边缘彻底杜绝最新数据点与数值被截断)
-  ctx.save()
-  ctx.beginPath()
-  ctx.rect(padLeft - 4, 2, canvasWidth - (padLeft - 4) - 2, bottomY - 2 + 6)
-  ctx.clip()
-
-  // 竖向选中高亮柱 (体重联动)
-  if (selectedPointIndex.value !== -1 && selectedPointIndex.value < items.length) {
-    const selX = padLeft + selectedPointIndex.value * spacing + curScrollX
-    const beamW = currentZoomCount.value <= 4 ? 42 : (currentZoomCount.value <= 8 ? 28 : 16)
-    ctx.fillStyle = 'rgba(59, 130, 246, 0.08)'
-    ctx.fillRect(selX - beamW / 2, topY - 5, beamW, bottomY - topY + 10)
-
-    ctx.setLineDash([3, 3])
-    ctx.strokeStyle = 'rgba(59, 130, 246, 0.5)'
-    ctx.beginPath()
-    ctx.moveTo(selX, topY - 5)
-    ctx.lineTo(selX, bottomY)
-    ctx.stroke()
-    ctx.setLineDash([])
-  }
-
-  const hasAnyWeight = items.some(i => i.wt !== null && typeof i.wt === 'number' && i.wt > 0)
-
-  if (!hasAnyWeight) {
-    ctx.fillStyle = '#94A3B8'
-    ctx.font = '12px sans-serif'
-    ctx.textAlign = 'center'
-    ctx.fillText('暂无体重记录', (padLeft + padRight) / 2, (topY + bottomY) / 2 + 4)
-  } else {
-    // 绘制与体重点 100% 紧密相连的蓝色折线
-    const validPoints: { x: number, y: number }[] = []
-    items.forEach((item, i) => {
-      if (item.wt !== null && typeof item.wt === 'number' && item.wt > 0) {
-        const x = padLeft + i * spacing + curScrollX
-        validPoints.push({ x, y: getY(item.wt) })
-      }
-    })
-
-    if (validPoints.length > 0) {
-      ctx.beginPath()
-      ctx.strokeStyle = '#3B82F6'
-      ctx.lineWidth = currentZoomCount.value <= 4 ? 2.8 : 2
-      ctx.lineCap = 'round'
-      ctx.lineJoin = 'round'
-
-      ctx.moveTo(validPoints[0].x, validPoints[0].y)
-      for (let j = 1; j < validPoints.length; j++) {
-        ctx.lineTo(validPoints[j].x, validPoints[j].y)
-      }
-      ctx.stroke()
-    }
-
-    // 绘制真实体重点与数值
-    const showNumbers = currentZoomCount.value <= 8
-    const dotR = currentZoomCount.value <= 4 ? 4.8 : (currentZoomCount.value <= 8 ? 3.5 : 2.2)
-    const fontStyle = currentZoomCount.value <= 4 ? 'bold 11.5px sans-serif' : 'bold 9.5px sans-serif'
-
-    items.forEach((item, i) => {
-      const x = padLeft + i * spacing + curScrollX
-      if (x < padLeft - 30 || x > padRight + 30) return
-
-      if (item.wt !== null && typeof item.wt === 'number' && item.wt > 0) {
-        const y = getY(item.wt)
-
-        ctx.beginPath()
-        ctx.arc(x, y, dotR, 0, Math.PI * 2)
-        ctx.fillStyle = '#3B82F6'
-        ctx.fill()
-        ctx.lineWidth = currentZoomCount.value <= 4 ? 1.8 : 1.2
-        ctx.strokeStyle = '#FFFFFF'
-        ctx.stroke()
-
-        if (showNumbers) {
-          ctx.fillStyle = '#2563EB'
-          ctx.font = fontStyle
-          const textStr = item.wt.toFixed(2)
-          const numW = (ctx.measureText ? ctx.measureText(textStr).width : 0) || 24
-          const halfNumW = numW / 2
-
-          let drawNumX = x
-          const safeTextLeft = padLeft - 2 + halfNumW
-          const safeTextRight = canvasWidth - 4 - halfNumW
-          if (drawNumX < safeTextLeft && x >= padLeft - 6) {
-            drawNumX = safeTextLeft
-          } else if (drawNumX > safeTextRight && x <= padRight + 10) {
-            drawNumX = safeTextRight
-          }
-
+        // 若间距足够或被选中，绘制完整微胶囊文字；若缩放极密，退化为清晰的彩色圆点防重叠
+        if (isSelected || (currentZoomCount.value <= 9 && x - tw / 2 > lastBadgeRightX)) {
+          const drawX = Math.max(padLeft + tw / 2 + 1, Math.min(canvasWidth - tw / 2 - 3, x))
+          drawRoundedBadge(ctx, drawX, rowCenterY, tw, 13, 4, st.bg, st.border)
+          ctx.fillStyle = st.text
           ctx.textAlign = 'center'
-          ctx.fillText(textStr, drawNumX, Math.max(14, y - (currentZoomCount.value <= 4 ? 8 : 6)))
+          ctx.fillText(badgeText, drawX, rowCenterY + 3)
+          lastBadgeRightX = drawX + tw / 2 + 3
+        } else {
+          ctx.beginPath()
+          ctx.arc(x, rowCenterY, 3, 0, Math.PI * 2)
+          ctx.fillStyle = st.text
+          ctx.fill()
         }
-      }
+      })
     })
   }
 
   ctx.restore()
 
-  // 3. 独立绘制 X 轴日期刻度
+  // 3. 独立绘制 X 轴刻度（带水平碰撞检测，彻底杜绝任何字号叠加）
+  let lastXLabelRight = -999
   items.forEach((item, i) => {
-    const x = padLeft + i * spacing + curScrollX
-    if (x < padLeft - 35 || x > padRight + 35) return
+    const x = getItemX(i)
+    if (x < padLeft - 30 || x > padRight + 30) return
 
-    let showX = true
-    const isMonthBoundary = item.dayNum.includes('/')
-    if (currentZoomCount.value > 20) {
-      showX = (i === 0 || (i + 1) % 5 === 1 || i === items.length - 1 || isMonthBoundary)
-    } else if (currentZoomCount.value > 12) {
-      showX = (i === 0 || i % 2 === 0 || i === items.length - 1 || isMonthBoundary)
-    } else {
-      showX = true
-    }
+    const isCur = selectedPointIndex.value === i
+    const font = isCur ? 'bold 10.5px sans-serif' : '10px sans-serif'
+    ctx.font = font
+    const labelStr = item.dayNum
+    const textW = (ctx.measureText ? ctx.measureText(labelStr).width : 28) + 8
 
-    if (showX) {
-      ctx.fillStyle = currentZoomCount.value <= 4 ? '#64748B' : '#94A3B8'
-      ctx.font = currentZoomCount.value <= 4 ? '10px sans-serif' : '9px sans-serif'
-
-      const textW = (ctx.measureText ? ctx.measureText(item.dayNum).width : 0) || 28
-      const halfW = textW / 2
-      let drawX = x
-      const safeLeft = padLeft - 2
-      const safeRight = canvasWidth - 6
-      if (drawX - halfW < safeLeft) {
-        drawX = safeLeft + halfW
-      } else if (drawX + halfW > safeRight) {
-        drawX = safeRight - halfW
-      }
-
-      ctx.textAlign = 'center'
-      ctx.fillText(item.dayNum, drawX, bottomY + 14)
+    if (isCur || x - textW / 2 > lastXLabelRight) {
+      const color = isCur ? '#0F172A' : '#64748B'
+      drawClampedXAxisLabel(ctx, labelStr, x, axisY + 15, padLeft, canvasWidth, color, font)
+      lastXLabelRight = x + textW / 2
     }
   })
 }
@@ -1405,17 +1725,15 @@ const getBoxLeft = () => {
   }
 }
 
-// 触发缩放极值回弹动画
 const triggerZoomLimitAnimation = (type: 'in' | 'out', tipText?: string) => {
   zoomLimitClass.value = type === 'in' ? 'fs-zoom-limit-in' : 'fs-zoom-limit-out'
-  const defaultText = type === 'in' ? '已放大至最大视图 (3项)' : '已缩小至全景视图'
+  const defaultText = type === 'in' ? '已放大至最大视图' : '已缩小至全景视图'
   showToastTip(tipText || defaultText)
   setTimeout(() => {
     zoomLimitClass.value = ''
   }, 240)
 }
 
-// 图表手势引擎（与首页图表共用，见 composables/useChartGestures.ts）
 const gestures = useChartGestures({
   zoomCount: currentZoomCount,
   selectedIndex: selectedPointIndex,
@@ -1427,11 +1745,10 @@ const gestures = useChartGestures({
   getBoxLeft,
   getZoomLimits: () => getTabZoomLimits(),
   redraw: () => {
-    drawBothCharts()
+    drawMainAnalysisChart()
     updateVisibleMetrics()
   },
   onZoomChange: (count) => {
-    // 双指缩放时同步高亮对应的快捷范围按钮
     if (currentTab.value === 'day') {
       if (count === 7) currentQuickRange.value = '7d'
       else if (count === 14) currentQuickRange.value = '14d'
@@ -1460,27 +1777,35 @@ onUnmounted(() => {
   gestures.dispose()
 })
 
-// 点击图表外空白处 -> 取消选中
 const handleBackgroundTap = () => {
-  // 若刚在图表上有触控操作（400ms 保护期），阻断合成 tap 事件误关选中
   if (gestures.wasTouchedRecently(400)) {
     return
   }
   if (selectedPointIndex.value !== -1) {
     selectedPointIndex.value = -1
-    drawBothCharts()
+    drawMainAnalysisChart()
   }
 }
 
-// 切换天/周/月 Tab (保持各自默认展示数量：天7，周7，月6)
-const switchTab = (tab: 'day' | 'week' | 'month') => {
+const switchTab = (tab: 'intraday' | 'day' | 'week' | 'month') => {
+  if (currentTab.value === tab) return
   currentTab.value = tab
-  if (tab === 'day') {
+  if (tab === 'intraday') {
+    if (allActiveDates.value.length > 0 && !allActiveDates.value.includes(intradayDate.value)) {
+      intradayDate.value = allActiveDates.value[allActiveDates.value.length - 1]
+    }
+    buildIntradayItems(intradayDate.value)
+    currentQuickRange.value = ''
+  } else if (tab === 'day') {
     currentQuickRange.value = '7d'
   } else {
     currentQuickRange.value = ''
   }
-  initPositionForCurrentTab()
+  nextTick(() => {
+    initGlucoseCanvas(() => {
+      initPositionForCurrentTab()
+    })
+  })
 }
 
 const handleClose = () => {
@@ -1491,30 +1816,50 @@ const handleClose = () => {
 watch(() => props.visible, (val) => {
   if (val) {
     prepareData()
-    // 平常默认折叠显示体重走势 (用户需点击展开才显示)
-    isWeightExpanded.value = false
     setTimeout(() => {
       isAnimShow.value = true
     }, 20)
     nextTick(() => {
       setTimeout(() => {
-        initCanvases()
+        initGlucoseCanvas(() => {
+          initPositionForCurrentTab()
+        })
       }, 80)
     })
   } else {
     isAnimShow.value = false
     selectedPointIndex.value = -1
-    isWeightExpanded.value = false
     gestures.dispose()
   }
 })
 
-watch([() => props.glucoseRecords, () => props.weightRecords], () => {
-  if (props.visible) {
-    prepareData()
-    drawBothCharts()
-  }
-}, { deep: true })
+watch(
+  [
+    () => props.glucoseRecords,
+    () => props.weightRecords,
+    () => props.insulinRecords,
+    () => props.mealRecords,
+    () => props.excretionRecords
+  ],
+  () => {
+    if (props.visible) {
+      const oldMinScrollX = getMinScrollX()
+      const offsetFromRight = scrollX - oldMinScrollX
+      prepareData()
+      if (currentQuickRange.value === 'all') {
+        const fullList = getFullListForCurrentTab()
+        currentZoomCount.value = Math.max(3, fullList.length)
+        scrollX = 0
+      } else {
+        const newMinScrollX = getMinScrollX()
+        scrollX = Math.max(newMinScrollX, Math.min(0, newMinScrollX + offsetFromRight))
+      }
+      updateVisibleMetrics()
+      drawMainAnalysisChart()
+    }
+  },
+  { deep: true }
+)
 </script>
 
 <style scoped>
@@ -1579,7 +1924,7 @@ watch([() => props.glucoseRecords, () => props.weightRecords], () => {
 
 /* 顶部栏 */
 .fs-header {
-  padding: 32rpx 40rpx 20rpx;
+  padding: 32rpx 36rpx 18rpx;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1605,11 +1950,11 @@ watch([() => props.glucoseRecords, () => props.weightRecords], () => {
   font-weight: bold;
 }
 
-/* 胶囊 Tab [ 天 | 周 | 月 ] */
+/* 胶囊 Tab [ 日内 | 天 | 周 | 月 ] */
 .fs-tab-wrapper {
   display: flex;
   justify-content: center;
-  padding: 20rpx 0 16rpx;
+  padding: 18rpx 0 12rpx;
 }
 .fs-tab-bar {
   display: inline-flex;
@@ -1619,7 +1964,7 @@ watch([() => props.glucoseRecords, () => props.weightRecords], () => {
   border: 2rpx solid #E2E8F0;
 }
 .fs-tab-item {
-  padding: 10rpx 44rpx;
+  padding: 10rpx 36rpx;
   font-size: 26rpx;
   color: #64748B;
   font-weight: 500;
@@ -1633,21 +1978,61 @@ watch([() => props.glucoseRecords, () => props.weightRecords], () => {
   box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.06);
 }
 
-/* 趋势分析快捷栏 [ 近7天 | 近14天 | 近30天 | 全部 ] (居左对齐，无文字前缀，无emoji) */
-.fs-quick-bar {
-  padding: 4rpx 36rpx 14rpx;
+/* 日内日期切换导航栏 */
+.fs-intraday-nav {
+  padding: 4rpx 36rpx 12rpx;
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+.fs-nav-step-btn {
+  padding: 10rpx 20rpx;
+  background: #F8FAFC;
+  border: 2rpx solid #E2E8F0;
+  border-radius: 100rpx;
+  font-size: 22rpx;
+  font-weight: 600;
+  color: #334155;
+}
+.fs-nav-step-btn.disabled {
+  opacity: 0.4;
+}
+.fs-nav-date-Mid {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6rpx 24rpx;
+  background: #EFF6FF;
+  border: 2rpx solid #BFDBFE;
+  border-radius: 20rpx;
+}
+.fs-nav-date-text {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: #1E40AF;
+}
+.fs-nav-date-sub {
+  font-size: 19rpx;
+  color: #3B82F6;
+  margin-top: 2rpx;
+}
+
+/* 趋势分析快捷栏 */
+.fs-quick-bar {
+  padding: 4rpx 36rpx 10rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   box-sizing: border-box;
 }
 .fs-quick-pills {
   display: flex;
   align-items: center;
-  gap: 12rpx;
+  gap: 10rpx;
 }
 .fs-quick-pill {
-  padding: 8rpx 22rpx;
+  padding: 8rpx 20rpx;
   font-size: 22rpx;
   color: #64748B;
   background-color: #F8FAFC;
@@ -1656,27 +2041,74 @@ watch([() => props.glucoseRecords, () => props.weightRecords], () => {
   font-weight: 500;
   transition: all 0.2s cubic-bezier(0.2, 0.9, 0.3, 1);
   text-align: center;
-  box-sizing: border-box;
   line-height: 1.2;
-}
-.fs-quick-pill:active {
-  transform: scale(0.94);
 }
 .fs-quick-pill.active {
   background-color: #EFF6FF;
   color: #2563EB;
   border-color: #3B82F6;
   font-weight: 700;
-  box-shadow: 0 2rpx 8rpx rgba(59, 130, 246, 0.16);
+}
+.fs-latest-anchor-hint {
+  font-size: 20rpx;
+  color: #64748B;
+  background: #F1F5F9;
+  padding: 4rpx 14rpx;
+  border-radius: 100rpx;
+  font-weight: 500;
 }
 
-/* 选项 A：Y 轴模式切换微型芯片 (聚焦 20 / 全景 35)，无 emoji */
+/* 动态时效同口径筛选栏 */
+.fs-period-filter-wrap {
+  padding: 0 36rpx 10rpx;
+}
+.fs-period-scroll {
+  width: 100%;
+  white-space: nowrap;
+}
+.fs-period-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 10rpx;
+}
+.fs-period-chip {
+  display: inline-block;
+  padding: 6rpx 20rpx;
+  font-size: 21rpx;
+  color: #64748B;
+  background: #F8FAFC;
+  border: 2rpx solid #E2E8F0;
+  border-radius: 100rpx;
+  font-weight: 500;
+}
+.fs-period-chip.active {
+  background: #FEF2F2;
+  color: #DC2626;
+  border-color: #FCA5A5;
+  font-weight: 700;
+}
+
+/* 顶部指标区 */
 .fs-metric-top-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8rpx;
-  min-height: 42rpx;
+  margin-bottom: 6rpx;
+  min-height: 40rpx;
+}
+.fs-top-right-actions {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+.fs-drilldown-btn {
+  padding: 4rpx 16rpx;
+  background: #EFF6FF;
+  border: 1.5rpx solid #93C5FD;
+  border-radius: 100rpx;
+  font-size: 20rpx;
+  font-weight: 700;
+  color: #2563EB;
 }
 .fs-y-toggle {
   display: inline-flex;
@@ -1686,11 +2118,6 @@ watch([() => props.glucoseRecords, () => props.weightRecords], () => {
   background-color: #F8FAFC;
   border: 1.5rpx solid #CBD5E1;
   border-radius: 100rpx;
-  transition: all 0.2s cubic-bezier(0.2, 0.9, 0.3, 1);
-  box-shadow: 0 1rpx 4rpx rgba(0, 0, 0, 0.04);
-}
-.fs-y-toggle:active {
-  transform: scale(0.94);
 }
 .fs-y-toggle-text {
   font-size: 20rpx;
@@ -1712,13 +2139,12 @@ watch([() => props.glucoseRecords, () => props.weightRecords], () => {
   background-color: #DC2626;
 }
 
-/* 主展示容器（自适应全屏，禁用原生垂直滚动防canvas脱落） */
 .fs-main-body {
   flex: 1;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
-  padding: 8rpx 36rpx 36rpx;
+  padding: 6rpx 36rpx 28rpx;
   box-sizing: border-box;
   overflow: hidden;
 }
@@ -1727,24 +2153,15 @@ watch([() => props.glucoseRecords, () => props.weightRecords], () => {
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
-  margin-bottom: 0;
-}
-.fs-section-border {
-  padding-top: 16rpx;
-  border-top: 2rpx solid #F1F5F9;
-  margin-top: 16rpx;
-  margin-bottom: 0;
 }
 
-/* 左侧大数字指标展示 */
 .fs-metric-header {
-  margin-bottom: 16rpx;
+  margin-bottom: 12rpx;
 }
 .fs-range-text {
-  font-size: 24rpx;
+  font-size: 23rpx;
   color: #94A3B8;
   font-weight: 500;
-  display: block;
 }
 .fs-tag-row {
   display: flex;
@@ -1753,8 +2170,8 @@ watch([() => props.glucoseRecords, () => props.weightRecords], () => {
   margin-bottom: 6rpx;
 }
 .fs-mode-tag {
-  font-size: 20rpx;
-  color: #64748B;
+  font-size: 21rpx;
+  color: #475569;
   font-weight: 600;
   background-color: #F8FAFC;
   border: 2rpx solid #E2E8F0;
@@ -1766,6 +2183,13 @@ watch([() => props.glucoseRecords, () => props.weightRecords], () => {
   color: #64748B;
   font-weight: 600;
 }
+.fs-minmax-hint {
+  font-size: 21rpx;
+  color: #64748B;
+  background: #F1F5F9;
+  padding: 2rpx 12rpx;
+  border-radius: 8rpx;
+}
 
 .fs-value-row {
   display: flex;
@@ -1773,7 +2197,7 @@ watch([() => props.glucoseRecords, () => props.weightRecords], () => {
   gap: 12rpx;
 }
 .fs-big-number {
-  font-size: 64rpx;
+  font-size: 62rpx;
   font-weight: 900;
   color: #0F172A;
   line-height: 1;
@@ -1805,30 +2229,105 @@ watch([() => props.glucoseRecords, () => props.weightRecords], () => {
   color: #DC2626;
   border: 2rpx solid #FECACA;
 }
-.badge-blue {
-  background-color: #EFF6FF;
-  color: #2563EB;
-  border: 2rpx solid #DBEAFE;
-}
 .badge-gray {
   background-color: #F1F5F9;
   color: #94A3B8;
   border: 2rpx solid #E2E8F0;
 }
 
-/* 图表容器：常规滑动时外框绝对保持静止，不产生任何晃动 */
+/* 多维事件叠加控制栏 */
+.fs-overlay-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12rpx;
+  padding: 8rpx 16rpx;
+  background: #F8FAFC;
+  border-radius: 16rpx;
+  border: 2rpx solid #F1F5F9;
+}
+.fs-overlay-label {
+  font-size: 21rpx;
+  color: #64748B;
+  font-weight: 600;
+  margin-right: 10rpx;
+  flex-shrink: 0;
+}
+.fs-overlay-chips {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  flex: 1;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.fs-ov-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6rpx;
+  padding: 6rpx 16rpx;
+  border-radius: 100rpx;
+  font-size: 21rpx;
+  font-weight: 600;
+  color: #64748B;
+  background: #FFFFFF;
+  border: 2rpx solid #E2E8F0;
+  transition: all 0.18s ease;
+}
+.ov-dot {
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 6rpx;
+}
+.dot-insulin { background: #EA580C; }
+.dot-meal { background: #D97706; }
+.dot-excretion { background: #0D9488; }
+.dot-weight { background: #2563EB; }
+
+.fs-ov-chip.chip-insulin.active {
+  background: #FFF7ED;
+  border-color: #FDBA74;
+  color: #C2410C;
+}
+.fs-ov-chip.chip-meal.active {
+  background: #FFFBEB;
+  border-color: #FDE68A;
+  color: #B45309;
+}
+.fs-ov-chip.chip-excretion.active {
+  background: #F0FDFA;
+  border-color: #99F6E4;
+  color: #0F766E;
+}
+.fs-ov-chip.chip-weight.active {
+  background: #EFF6FF;
+  border-color: #BFDBFE;
+  color: #1D4ED8;
+}
+.fs-ov-clear {
+  padding: 6rpx 14rpx;
+  border-radius: 100rpx;
+  font-size: 20rpx;
+  font-weight: 700;
+  color: #DC2626;
+  background: #FEF2F2;
+  border: 2rpx solid #FECACA;
+}
+
+/* 图表容器 */
 .fs-canvas-box {
   width: 100%;
-  height: 330rpx;
+  height: 390rpx;
   background-color: #FFFFFF;
   border-radius: 24rpx;
   border: 2rpx solid #E2E8F0;
   position: relative;
   box-sizing: border-box;
   overflow: hidden;
+  transition: height 0.2s ease;
 }
-.fs-canvas-box-sm {
-  height: 220rpx;
+.fs-canvas-box.has-overlays {
+  height: 440rpx;
 }
 .fs-canvas {
   width: 100%;
@@ -1836,7 +2335,80 @@ watch([() => props.glucoseRecords, () => props.weightRecords], () => {
   display: block;
 }
 
-/* 边缘触底微弹性轻晃反馈 (仅到达最早/最新数据极值时触发，正常滑动绝对静止) */
+/* 底部选中节点/当日事件详情面板 */
+.fs-detail-panel {
+  margin-top: 16rpx;
+  background: #F8FAFC;
+  border: 2rpx solid #E2E8F0;
+  border-radius: 20rpx;
+  padding: 16rpx 22rpx;
+  flex: 1;
+  min-height: 120rpx;
+  max-height: 230rpx;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.fs-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10rpx;
+}
+.fs-detail-title {
+  font-size: 23rpx;
+  font-weight: 700;
+  color: #334155;
+}
+.fs-detail-drill {
+  font-size: 21rpx;
+  font-weight: 700;
+  color: #2563EB;
+}
+.fs-detail-scroll {
+  flex: 1;
+  overflow: hidden;
+}
+.fs-detail-tags {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+.fs-detail-item {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  padding: 8rpx 14rpx;
+  background: #FFFFFF;
+  border-radius: 12rpx;
+  border: 1.5rpx solid #E2E8F0;
+  font-size: 22rpx;
+}
+.di-badge {
+  font-size: 20rpx;
+  font-weight: 700;
+  padding: 2rpx 10rpx;
+  border-radius: 6rpx;
+  flex-shrink: 0;
+}
+.di-main {
+  font-weight: 700;
+  color: #1E293B;
+}
+.di-sub {
+  color: #64748B;
+  font-size: 21rpx;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.di-glucose .di-badge { background: #FEF2F2; color: #DC2626; }
+.di-insulin .di-badge { background: #FFF7ED; color: #EA580C; }
+.di-meal .di-badge { background: #FFFBEB; color: #D97706; }
+.di-excretion .di-badge { background: #F0FDFA; color: #0D9488; }
+.di-weight .di-badge { background: #EFF6FF; color: #2563EB; }
+
 @keyframes edgeBounceLeft {
   0% { transform: translateX(0); }
   35% { transform: translateX(12rpx); }
@@ -1855,8 +2427,6 @@ watch([() => props.glucoseRecords, () => props.weightRecords], () => {
 .fs-edge-limit-right {
   animation: edgeBounceRight 0.26s cubic-bezier(0.25, 1, 0.5, 1) !important;
 }
-
-/* 缩放极限弹性震荡动画 */
 .fs-zoom-limit-in {
   transform: scale(1.036) !important;
   transition: transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.25) !important;
@@ -1864,147 +2434,5 @@ watch([() => props.glucoseRecords, () => props.weightRecords], () => {
 .fs-zoom-limit-out {
   transform: scale(0.964) !important;
   transition: transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.25) !important;
-}
-
-/* 体重折叠收起条 (平常默认展示形态) */
-.fs-weight-collapsed-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background-color: #F8FAFC;
-  border: 2rpx solid #E2E8F0;
-  border-radius: 20rpx;
-  padding: 16rpx 24rpx;
-  margin-top: 14rpx;
-  transition: all 0.2s cubic-bezier(0.2, 0.9, 0.3, 1);
-  box-sizing: border-box;
-}
-.fs-weight-collapsed-bar:active {
-  background-color: #F1F5F9;
-  transform: scale(0.99);
-}
-.fs-wbar-left {
-  display: flex;
-  align-items: center;
-  gap: 16rpx;
-}
-.fs-wbar-badge-icon {
-  width: 52rpx;
-  height: 52rpx;
-  border-radius: 14rpx;
-  background-color: #EFF6FF;
-  border: 2rpx solid #DBEAFE;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.fs-wbar-icon-text {
-  font-size: 22rpx;
-  font-weight: 800;
-  color: #2563EB;
-}
-.fs-wbar-info {
-  display: flex;
-  flex-direction: column;
-  gap: 4rpx;
-}
-.fs-wbar-title-row {
-  display: flex;
-  align-items: center;
-  gap: 10rpx;
-}
-.fs-wbar-title {
-  font-size: 26rpx;
-  font-weight: 700;
-  color: #1E293B;
-}
-.fs-wbar-badge {
-  margin-left: 0;
-  font-size: 19rpx;
-  padding: 2rpx 10rpx;
-}
-.fs-wbar-sub {
-  font-size: 20rpx;
-  color: #94A3B8;
-  font-weight: 500;
-}
-.fs-wbar-right {
-  display: flex;
-  align-items: center;
-  gap: 16rpx;
-}
-.fs-wbar-val-block {
-  display: flex;
-  align-items: baseline;
-  gap: 4rpx;
-}
-.fs-wbar-val {
-  font-size: 38rpx;
-  font-weight: 800;
-  color: #0F172A;
-  line-height: 1;
-}
-.fs-wbar-unit {
-  font-size: 22rpx;
-  color: #64748B;
-  font-weight: 600;
-}
-.fs-wbar-empty {
-  font-size: 24rpx;
-  color: #94A3B8;
-  font-weight: 500;
-}
-.fs-wbar-btn {
-  display: flex;
-  align-items: center;
-  gap: 6rpx;
-  padding: 8rpx 18rpx;
-  background-color: #EFF6FF;
-  border: 1.5rpx solid #BFDBFE;
-  border-radius: 100rpx;
-  transition: all 0.2s ease;
-}
-.fs-wbar-btn:active {
-  background-color: #DBEAFE;
-}
-.fs-wbar-btn-text {
-  font-size: 22rpx;
-  font-weight: 700;
-  color: #2563EB;
-  line-height: 1;
-}
-.fs-wbar-arrow {
-  font-size: 16rpx;
-  color: #2563EB;
-  line-height: 1;
-  transform: translateY(1rpx);
-  transition: transform 0.2s ease;
-}
-
-/* 展开状态下的收起胶囊按钮 */
-.fs-weight-collapse-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6rpx;
-  padding: 4rpx 16rpx;
-  background-color: #F8FAFC;
-  border: 1.5rpx solid #CBD5E1;
-  border-radius: 100rpx;
-  transition: all 0.2s ease;
-}
-.fs-weight-collapse-btn:active {
-  transform: scale(0.94);
-  background-color: #F1F5F9;
-}
-.fs-weight-collapse-btn-text {
-  font-size: 20rpx;
-  font-weight: 700;
-  color: #64748B;
-  line-height: 1.2;
-}
-.fs-wbar-arrow.up {
-  font-size: 16rpx;
-  color: #64748B;
-  transform: translateY(-1rpx);
 }
 </style>

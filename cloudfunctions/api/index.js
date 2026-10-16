@@ -26,7 +26,7 @@ const RECORD_FIELDS = {
 }
 
 // 猫咪档案允许由前端修改的字段（_openid / shared_with / auto_feeder_config 不可经 saveCat 修改）
-const CAT_FIELDS = ['name', 'avatar', 'birthday', 'diagnosis_date', 'targetMin', 'targetMax']
+const CAT_FIELDS = ['name', 'avatar', 'birthday', 'diagnosis_date', 'targetMin', 'targetMax', 'hypoAlertEnabled']
 
 const INVITE_TTL_MS = 7 * 24 * 3600 * 1000 // 邀请有效期 7 天
 const INVITE_REUSE_MIN_REMAINING_MS = 24 * 3600 * 1000 // 剩余有效期大于 1 天时复用旧邀请
@@ -308,17 +308,33 @@ exports.main = async (event, context) => {
         ])).get()
         
         // 不再转换 tempFileURL，微信端原生支持 cloud:// 且无过期问题
-
-        return { success: true, data }
+        // 同时返回当前调用者的 openid，确保前端各页面无需依赖本地缓存即可准确判定创建者/管理员身份
+        return { success: true, data, openid }
       }
 
       case 'saveCat': {
         const { catId } = payload
         // 字段白名单：禁止通过 saveCat 修改 _openid / shared_with 等权限字段
         const catData = pick(payload.catData, CAT_FIELDS)
-        if (catData.name !== undefined) catData.name = String(catData.name).slice(0, 30)
-        if (catData.targetMin !== undefined) catData.targetMin = Number(catData.targetMin)
-        if (catData.targetMax !== undefined) catData.targetMax = Number(catData.targetMax)
+        if (catData.name !== undefined) catData.name = String(catData.name).slice(0, 30).trim()
+        if (catData.targetMin !== undefined) {
+          const minVal = Number(catData.targetMin)
+          catData.targetMin = (!isNaN(minVal) && minVal > 0 && minVal < 50) ? minVal : 5.0
+        }
+        if (catData.targetMax !== undefined) {
+          const maxVal = Number(catData.targetMax)
+          catData.targetMax = (!isNaN(maxVal) && maxVal > 0 && maxVal <= 60) ? maxVal : 15.0
+        }
+        if (
+          catData.targetMin !== undefined &&
+          catData.targetMax !== undefined &&
+          catData.targetMin >= catData.targetMax
+        ) {
+          throw new Error('目标血糖下限必须小于上限')
+        }
+        if (catData.hypoAlertEnabled !== undefined) {
+          catData.hypoAlertEnabled = Boolean(catData.hypoAlertEnabled)
+        }
         catData.updateTime = Date.now()
         
         // 执行安全校验
@@ -339,6 +355,9 @@ exports.main = async (event, context) => {
         } else {
           // Add new cat
           if (!catData.name) throw new Error('Missing cat name')
+          if (catData.targetMin === undefined) catData.targetMin = 5.0
+          if (catData.targetMax === undefined) catData.targetMax = 15.0
+          if (catData.hypoAlertEnabled === undefined) catData.hypoAlertEnabled = true
           catData.shared_with = []
           catData._openid = openid
           catData.createTime = Date.now()
@@ -362,7 +381,10 @@ exports.main = async (event, context) => {
         await Promise.all(
           RECORD_COLLECTIONS.map(name => db.collection(name).where({ cat_id: catId }).remove())
         )
-        await db.collection('reminders').where({ cat_id: catId, status: 'pending' }).remove().catch(() => {})
+        await db.collection('reminders').where({ cat_id: catId }).remove().catch(() => {})
+        if (cat.avatar && typeof cat.avatar === 'string' && cat.avatar.startsWith('cloud://')) {
+          await cloud.deleteFile({ fileList: [cat.avatar] }).catch(() => {})
+        }
         
         return { success: true }
       }
@@ -454,13 +476,17 @@ exports.main = async (event, context) => {
       // ==================== 通用记录 ====================
 
       case 'getRecords': {
-        const { catId, type } = payload
+        const { catId, type, recordDate } = payload
         assertRecordType(type)
         await checkCatAccess(catId)
-        const limit = clampInt(payload.limit, 1, 100, 20)
+        const limit = clampInt(payload.limit, 1, 1000, 20)
         const skip = clampInt(payload.skip, 0, 100000, 0)
+        const whereCond = { cat_id: catId }
+        if (recordDate && typeof recordDate === 'string' && DATE_RE.test(recordDate)) {
+          whereCond.record_date = recordDate
+        }
         const { data } = await db.collection(type)
-          .where({ cat_id: catId })
+          .where(whereCond)
           .orderBy('createTime', 'desc')
           .skip(skip)
           .limit(limit)
@@ -474,6 +500,23 @@ exports.main = async (event, context) => {
         const raw = payload.recordData || {}
         await checkCatAccess(raw.cat_id)
         const recordData = pick(raw, RECORD_FIELDS[type])
+        if (type === 'blood_glucose') {
+          const val = Number(recordData.bg_value)
+          if (isNaN(val) || val <= 0 || val > 100) throw new Error('Invalid bg_value')
+          recordData.bg_value = val
+        } else if (type === 'insulin_records') {
+          const val = Number(recordData.dose)
+          if (isNaN(val) || val <= 0 || val > 50) throw new Error('Invalid dose')
+          recordData.dose = val
+        } else if (type === 'meal_records') {
+          const val = Number(recordData.food_grams)
+          if (isNaN(val) || val < 0 || val > 2000) throw new Error('Invalid food_grams')
+          recordData.food_grams = val
+        } else if (type === 'weight_records') {
+          const val = Number(recordData.weight_value)
+          if (isNaN(val) || val <= 0 || val > 50) throw new Error('Invalid weight_value')
+          recordData.weight_value = val
+        }
         if (recordData.note !== undefined) recordData.note = String(recordData.note).slice(0, 500)
         if (typeof recordData.createTime !== 'number' || isNaN(recordData.createTime)) {
           recordData.createTime = Date.now()
@@ -484,6 +527,47 @@ exports.main = async (event, context) => {
           data: recordData
         })
         return { success: true, id: res._id }
+      }
+
+      case 'updateRecord': {
+        const { catId, type, recordId } = payload
+        assertRecordType(type)
+        if (!recordId || typeof recordId !== 'string') throw new Error('Missing recordId')
+        await checkCatAccess(catId)
+        const raw = payload.recordData || {}
+        const recordData = pick(raw, RECORD_FIELDS[type])
+        if (type === 'blood_glucose' && recordData.bg_value !== undefined) {
+          const val = Number(recordData.bg_value)
+          if (isNaN(val) || val <= 0 || val > 100) throw new Error('Invalid bg_value')
+          recordData.bg_value = val
+        } else if (type === 'insulin_records' && recordData.dose !== undefined) {
+          const val = Number(recordData.dose)
+          if (isNaN(val) || val <= 0 || val > 50) throw new Error('Invalid dose')
+          recordData.dose = val
+        } else if (type === 'meal_records' && recordData.food_grams !== undefined) {
+          const val = Number(recordData.food_grams)
+          if (isNaN(val) || val < 0 || val > 2000) throw new Error('Invalid food_grams')
+          recordData.food_grams = val
+        } else if (type === 'weight_records' && recordData.weight_value !== undefined) {
+          const val = Number(recordData.weight_value)
+          if (isNaN(val) || val <= 0 || val > 50) throw new Error('Invalid weight_value')
+          recordData.weight_value = val
+        }
+        if (recordData.note !== undefined) recordData.note = String(recordData.note).slice(0, 500)
+        if (recordData.createTime !== undefined) {
+          const ts = Number(recordData.createTime)
+          if (!isNaN(ts) && ts > 0) recordData.createTime = ts
+          else delete recordData.createTime
+        }
+        recordData.updateTime = Date.now()
+        recordData.updated_by = openid
+        const res = await db.collection(type).where({ _id: recordId, cat_id: catId }).update({
+          data: recordData
+        })
+        if (!res.stats || res.stats.updated === 0) {
+          throw new Error('Record not found')
+        }
+        return { success: true }
       }
 
       case 'deleteRecord': {
@@ -503,7 +587,9 @@ exports.main = async (event, context) => {
 
       case 'recognizeNutrition': {
         const { fileID } = payload
-        if (!fileID) throw new Error('Missing fileID')
+        if (!fileID || typeof fileID !== 'string' || !fileID.startsWith('cloud://') || !fileID.includes('/ocr_temp/')) {
+          throw new Error('Invalid fileID')
+        }
         
         let ocrText = ''
         try {
