@@ -8,6 +8,16 @@ export const DEFAULT_TARGET_MAX = 15.0
 export const WARNING_BUFFER_RATIO = 1.3
 export const HYPO_SEVERE_THRESHOLD = 3.9
 
+/**
+ * 临床记录数值合法边界规范（与云端 recordDomainSpec 保持统一）
+ */
+export const RECORD_VALUE_BOUNDS = {
+  blood_glucose: { minExclusive: 0, max: 100 },
+  insulin_records: { minExclusive: 0, max: 50, typicalMax: 20 },
+  meal_records: { min: 0, max: 2000, singleMealMax: 1000 },
+  weight_records: { minExclusive: 0, max: 50 }
+} as const
+
 const HYPO_ALERT_STORAGE_KEY = 'hypo_alert_enabled'
 
 /**
@@ -140,4 +150,78 @@ export const calculateCatAge = (birthday?: string): number | null => {
     ageNum--
   }
   return Math.max(0, ageNum)
+}
+
+/**
+ * 提取记录项的精确比较时间戳（毫秒级，兼容带有秒数的字符串或 createTime 毫秒偏移）
+ */
+export const getRecordExactTimestamp = (item: any, fallbackField: string = 'measure_time'): number => {
+  if (!item) return 0
+  const dateStr = item.record_date || ''
+  const timeStr = item[fallbackField] || item.measure_time || item.inject_time || item.meal_time || item.record_time || ''
+
+  if (dateStr && typeof dateStr === 'string' && dateStr.includes('-')) {
+    const parts = dateStr.split('-').map(Number)
+    const y = parts[0]
+    const m = parts[1]
+    const d = parts[2]
+    let hour = 0
+    let min = 0
+    let sec = 0
+
+    if (timeStr && typeof timeStr === 'string') {
+      const match = timeStr.match(/(\d{1,2}):(\d{2})(?::(\d{1,2}))?/)
+      if (match) {
+        hour = Number(match[1]) || 0
+        min = Number(match[2]) || 0
+        if (match[3] !== undefined) {
+          sec = Number(match[3]) || 0
+        }
+      }
+    }
+
+    let exactMs = new Date(y, m - 1, d, hour, min, sec, 0).getTime()
+
+    // 若 timeStr 未提供秒数（如 HH:mm），但带有真实 createTime，且 createTime 的年月日时分与之吻合，采用 createTime 的秒与毫秒
+    if (sec === 0 && item.createTime && typeof item.createTime === 'number') {
+      const cDate = new Date(item.createTime)
+      if (
+        cDate.getFullYear() === y &&
+        cDate.getMonth() === m - 1 &&
+        cDate.getDate() === d &&
+        cDate.getHours() === hour &&
+        cDate.getMinutes() === min
+      ) {
+        exactMs = item.createTime
+      }
+    }
+    return exactMs
+  }
+
+  if (item.createTime && typeof item.createTime === 'number') {
+    return item.createTime
+  }
+  return 0
+}
+
+/**
+ * 记录项按真实时间升序排序比较器（最早在前，最新在后，供折线图从左到右绘制）
+ */
+export const compareRecordsChronological = (a: any, b: any, fallbackField: string = 'measure_time'): number => {
+  const tsA = getRecordExactTimestamp(a, fallbackField)
+  const tsB = getRecordExactTimestamp(b, fallbackField)
+  if (tsA !== tsB) {
+    return tsA - tsB
+  }
+  if (a.createTime && b.createTime && a.createTime !== b.createTime) {
+    return a.createTime - b.createTime
+  }
+  return String(a._id || '').localeCompare(String(b._id || ''))
+}
+
+/**
+ * 记录项按真实时间降序排序比较器（最新在前，最早在后，供列表和近期展示）
+ */
+export const compareRecordsDescending = (a: any, b: any, fallbackField: string = 'measure_time'): number => {
+  return compareRecordsChronological(b, a, fallbackField)
 }

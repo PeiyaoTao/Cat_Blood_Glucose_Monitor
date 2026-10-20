@@ -434,7 +434,7 @@ interface ChartItem {
   bgCount: number
   singlePeriod?: string
   singleTime?: string
-  bgDetails: Array<{ time: string; val: number; period: string; note?: string }>
+  bgDetails: Array<{ time: string; val: number; period: string; note?: string; timestamp?: number; createTime?: number; _id?: any }>
   wt: number | null
   wtCount: number
   timestamp: number
@@ -469,20 +469,65 @@ const parseItemDateAndTime = (item: any, timeField?: string) => {
   const sortKey = `${y}-${pad2(m)}-${pad2(d)}`
   const dStr = `${m}/${d}`
   const dayNum = `${m}/${d}`
-  const timestamp = new Date(y, m - 1, d).getTime()
 
   let rawTime = (timeField && item[timeField]) || item.measure_time || item.inject_time || item.meal_time || item.record_time || ''
-  if (!rawTime && item.createTime) {
+  let hour = 12, min = 0, sec = 0, hasExplicitSec = false
+
+  if (rawTime) {
+    const mTime = String(rawTime).match(/(\d{1,2}):(\d{2})(?::(\d{1,2}))?/)
+    if (mTime) {
+      hour = Number(mTime[1]) || 0
+      min = Number(mTime[2]) || 0
+      if (mTime[3] !== undefined) {
+        sec = Number(mTime[3]) || 0
+        hasExplicitSec = true
+      }
+    }
+  } else if (item.createTime) {
     const dt = new Date(item.createTime)
     if (!isNaN(dt.getTime())) {
-      rawTime = `${pad2(dt.getHours())}:${pad2(dt.getMinutes())}`
+      hour = dt.getHours()
+      min = dt.getMinutes()
+      sec = dt.getSeconds()
+      hasExplicitSec = sec > 0
     }
   }
-  if (!/^\d{2}:\d{2}$/.test(rawTime)) {
-    const mTime = String(rawTime).match(/(\d{1,2}):(\d{2})/)
-    rawTime = mTime ? `${pad2(Number(mTime[1]))}:${mTime[2]}` : '12:00'
+
+  // 若 timeStr 未提供秒数，但 createTime 的年月日时分一致且含秒数：
+  if (!hasExplicitSec && item.createTime && typeof item.createTime === 'number') {
+    const dt = new Date(item.createTime)
+    if (
+      dt.getFullYear() === y &&
+      dt.getMonth() === m - 1 &&
+      dt.getDate() === d &&
+      dt.getHours() === hour &&
+      dt.getMinutes() === min &&
+      dt.getSeconds() > 0
+    ) {
+      sec = dt.getSeconds()
+      hasExplicitSec = true
+    }
   }
-  return { sortKey, dStr, dayNum, timestamp, timeStr: rawTime }
+
+  const timeStr = hasExplicitSec
+    ? `${pad2(hour)}:${pad2(min)}:${pad2(sec)}`
+    : `${pad2(hour)}:${pad2(min)}`
+
+  let timestamp = new Date(y, m - 1, d, hour, min, sec, 0).getTime()
+  if (item.createTime && typeof item.createTime === 'number') {
+    const dt = new Date(item.createTime)
+    if (
+      dt.getFullYear() === y &&
+      dt.getMonth() === m - 1 &&
+      dt.getDate() === d &&
+      dt.getHours() === hour &&
+      dt.getMinutes() === min
+    ) {
+      timestamp = item.createTime
+    }
+  }
+
+  return { sortKey, dStr, dayNum, timestamp, timeStr, hasExplicitSec }
 }
 
 // 动态提取当前猫咪所有实际使用过的时效阶段 + 自定义预设时效
@@ -550,47 +595,94 @@ const finalizeOverlaySummary = (ov: OverlaySummary) => {
   }
 }
 
-// 构建日内曲线数据 (针对 intradayDate 当日按时间 HH:mm 排序)
+// 构建日内曲线数据 (针对 intradayDate 当日按时间精确排序)
 const buildIntradayItems = (targetDateKey: string) => {
-  const timeBuckets: Record<string, ChartItem> = {}
   const [y, m, d] = targetDateKey.split('-').map(Number)
   const baseDateLabel = `${m}/${d}`
 
-  const ensureSlot = (timeStr: string): ChartItem => {
-    if (!timeBuckets[timeStr]) {
-      const [hh, mm] = timeStr.split(':').map(Number)
-      const ts = new Date(y, m - 1, d, hh || 0, mm || 0).getTime()
-      timeBuckets[timeStr] = {
-        dateKey: targetDateKey,
-        date: `${baseDateLabel} ${timeStr}`,
-        dayNum: timeStr,
-        bg: null,
-        bgCount: 0,
-        bgDetails: [],
-        wt: null,
-        wtCount: 0,
-        timestamp: ts,
-        overlay: createEmptyOverlay()
-      }
-    }
-    return timeBuckets[timeStr]
-  }
+  // 先对当日所有血糖记录按精确时间戳升序排序 (最早在前，最新在后)
+  const sortedGlucose = (props.glucoseRecords || [])
+    .filter((item: any) => {
+      const bgVal = Number(item.bg_value)
+      if (!Number.isFinite(bgVal) || bgVal <= 0) return false
+      const info = parseItemDateAndTime(item, 'measure_time')
+      return info.sortKey === targetDateKey
+    })
+    .sort((a: any, b: any) => {
+      const infoA = parseItemDateAndTime(a, 'measure_time')
+      const infoB = parseItemDateAndTime(b, 'measure_time')
+      if (infoA.timestamp !== infoB.timestamp) return infoA.timestamp - infoB.timestamp
+      if (a.createTime && b.createTime && a.createTime !== b.createTime) return a.createTime - b.createTime
+      return String(a._id || '').localeCompare(String(b._id || ''))
+    })
 
-  // 1. 当日血糖
-  ;(props.glucoseRecords || []).forEach((item: any) => {
+  const slotList: ChartItem[] = []
+  const slotMapByTime: Record<string, ChartItem> = {}
+
+  // 1. 将每一个血糖记录按时间生成专属数据点（同分多次记录亦能清晰区分先后）
+  sortedGlucose.forEach((item: any) => {
     const bgVal = Number(item.bg_value)
-    if (!Number.isFinite(bgVal) || bgVal <= 0) return
     const info = parseItemDateAndTime(item, 'measure_time')
-    if (info.sortKey !== targetDateKey) return
-    const slot = ensureSlot(info.timeStr)
     const pName = item.period || item.status || '常规'
-    slot.bgDetails.push({ time: info.timeStr, val: bgVal, period: pName, note: item.note })
-    slot.bgCount = slot.bgDetails.length
-    const sum = slot.bgDetails.reduce((s, x) => s + x.val, 0)
-    slot.bg = Number((sum / slot.bgCount).toFixed(1))
-    slot.singlePeriod = pName
-    slot.singleTime = info.timeStr
+
+    // 若同一分钟已有同秒/同分记录，则添加序号后缀标识区别
+    let displayTime = info.timeStr
+    let dupCount = 1
+    while (slotMapByTime[displayTime]) {
+      dupCount++
+      displayTime = `${info.timeStr} (${dupCount})`
+    }
+
+    const slotItem: ChartItem = {
+      dateKey: targetDateKey,
+      date: `${baseDateLabel} ${displayTime}`,
+      dayNum: displayTime,
+      bg: bgVal,
+      bgCount: 1,
+      bgDetails: [{
+        time: info.timeStr,
+        val: bgVal,
+        period: pName,
+        note: item.note,
+        timestamp: info.timestamp,
+        createTime: item.createTime,
+        _id: item._id
+      }],
+      wt: null,
+      wtCount: 0,
+      timestamp: info.timestamp,
+      overlay: createEmptyOverlay(),
+      singlePeriod: pName,
+      singleTime: info.timeStr
+    }
+    slotMapByTime[displayTime] = slotItem
+    if (!slotMapByTime[info.timeStr]) {
+      slotMapByTime[info.timeStr] = slotItem
+    }
+    slotList.push(slotItem)
   })
+
+  // 辅助函数：根据事件时间找到已有 slot 或创建新的纯事件 slot
+  const ensureEventSlot = (info: ReturnType<typeof parseItemDateAndTime>): ChartItem => {
+    if (slotMapByTime[info.timeStr]) {
+      return slotMapByTime[info.timeStr]
+    }
+    const slotItem: ChartItem = {
+      dateKey: targetDateKey,
+      date: `${baseDateLabel} ${info.timeStr}`,
+      dayNum: info.timeStr,
+      bg: null,
+      bgCount: 0,
+      bgDetails: [],
+      wt: null,
+      wtCount: 0,
+      timestamp: info.timestamp,
+      overlay: createEmptyOverlay()
+    }
+    slotMapByTime[info.timeStr] = slotItem
+    slotList.push(slotItem)
+    return slotItem
+  }
 
   // 2. 当日叠加事件（仅在对应开关开启或当日作为时间轴展示时收录）
   if (overlays.value.insulin) {
@@ -599,7 +691,7 @@ const buildIntradayItems = (targetDateKey: string) => {
       if (!Number.isFinite(dose) || dose <= 0) return
       const info = parseItemDateAndTime(item, 'inject_time')
       if (info.sortKey !== targetDateKey) return
-      const slot = ensureSlot(info.timeStr)
+      const slot = ensureEventSlot(info)
       slot.overlay.insulinList.push({
         time: info.timeStr,
         dose,
@@ -615,7 +707,7 @@ const buildIntradayItems = (targetDateKey: string) => {
       if (!Number.isFinite(grams) || grams <= 0) return
       const info = parseItemDateAndTime(item, 'meal_time')
       if (info.sortKey !== targetDateKey) return
-      const slot = ensureSlot(info.timeStr)
+      const slot = ensureEventSlot(info)
       slot.overlay.mealList.push({
         time: info.timeStr,
         grams,
@@ -629,7 +721,7 @@ const buildIntradayItems = (targetDateKey: string) => {
     ;(props.excretionRecords || []).forEach((item: any) => {
       const info = parseItemDateAndTime(item, 'record_time')
       if (info.sortKey !== targetDateKey) return
-      const slot = ensureSlot(info.timeStr)
+      const slot = ensureEventSlot(info)
       slot.overlay.excretionList.push({
         time: info.timeStr,
         urine: item.urine || '排尿正常',
@@ -644,7 +736,7 @@ const buildIntradayItems = (targetDateKey: string) => {
       if (!Number.isFinite(wtVal) || wtVal <= 0) return
       const info = parseItemDateAndTime(item, 'measure_time')
       if (info.sortKey !== targetDateKey) return
-      const slot = ensureSlot(info.timeStr)
+      const slot = ensureEventSlot(info)
       slot.wt = wtVal
       slot.wtCount++
       slot.overlay.weightList.push({
@@ -654,13 +746,13 @@ const buildIntradayItems = (targetDateKey: string) => {
     })
   }
 
-  const sortedTimes = Object.keys(timeBuckets).sort()
-  const list = sortedTimes.map(t => {
-    const slot = timeBuckets[t]
-    finalizeOverlaySummary(slot.overlay)
-    return slot
+  // 按精确业务时间升序排序 (最早在前，最新在后)
+  slotList.sort((a, b) => {
+    if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp
+    return (a.dayNum || '').localeCompare(b.dayNum || '')
   })
-  processedIntradayItems.value = list
+  slotList.forEach(slot => finalizeOverlaySummary(slot.overlay))
+  processedIntradayItems.value = slotList
 }
 
 // 预处理全量数据：采用「紧凑有效记录日」策略，彻底告别断更空白图
@@ -671,7 +763,7 @@ const prepareData = () => {
     dStr: string
     dayNum: string
     timestamp: number
-    bgDetails: Array<{ time: string; val: number; period: string; note?: string }>
+    bgDetails: Array<{ time: string; val: number; period: string; note?: string; timestamp?: number; createTime?: number; _id?: any }>
     wtList: number[]
     overlay: OverlaySummary
   }> = {}
@@ -708,7 +800,10 @@ const prepareData = () => {
       time: info.timeStr,
       val: bgVal,
       period: pName,
-      note: item.note
+      note: item.note,
+      timestamp: info.timestamp,
+      createTime: item.createTime,
+      _id: item._id
     })
   })
 
@@ -796,7 +891,14 @@ const prepareData = () => {
 
   const dayItemList: ChartItem[] = sortedDayKeys.map(key => {
     const b = dateMap[key]
-    b.bgDetails.sort((x, y) => x.time.localeCompare(y.time))
+    b.bgDetails.sort((x, y) => {
+      const tX = x.timestamp || 0
+      const tY = y.timestamp || 0
+      if (tX !== tY) return tX - tY
+      if (x.time !== y.time) return x.time.localeCompare(y.time)
+      if (x.createTime && y.createTime && x.createTime !== y.createTime) return x.createTime - y.createTime
+      return String(x._id || '').localeCompare(String(y._id || ''))
+    })
     const bgVals = b.bgDetails.map(d => d.val)
     const bgAvg = bgVals.length
       ? Math.round((bgVals.reduce((s, x) => s + x, 0) / bgVals.length) * 10) / 10

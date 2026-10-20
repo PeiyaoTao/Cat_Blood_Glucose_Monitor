@@ -1,5 +1,14 @@
 const cloud = require('wx-server-sdk')
 const crypto = require('crypto')
+const {
+  RECORD_COLLECTIONS,
+  RECORD_FIELDS,
+  DATE_RE,
+  pickRecordFields: pick,
+  assertRecordType,
+  compareRecordsDescendingCST,
+  validateAndNormalizeRecord
+} = require('./recordDomainSpec')
 
 cloud.init({
   env: cloud.DYNAMIC_CURRENT_ENV
@@ -7,47 +16,13 @@ cloud.init({
 
 // ==================== 常量与白名单 ====================
 
-// 允许通过通用记录接口读写的集合（严禁前端传入任意集合名）
-const RECORD_COLLECTIONS = [
-  'blood_glucose',
-  'insulin_records',
-  'meal_records',
-  'excretion_records',
-  'weight_records'
-]
-
-// 各记录集合允许写入的字段（其余字段一律丢弃，cat_id / _openid 由服务端强制写入）
-const RECORD_FIELDS = {
-  blood_glucose: ['bg_value', 'period', 'status', 'record_date', 'measure_time', 'note', 'createTime'],
-  insulin_records: ['dose', 'period', 'dose_adjustment', 'insulin_type', 'record_date', 'inject_time', 'note', 'createTime'],
-  meal_records: ['food_grams', 'period', 'food_brand', 'extras', 'record_date', 'meal_time', 'note', 'createTime'],
-  excretion_records: ['urine', 'stool_status', 'stool_color', 'record_date', 'record_time', 'note', 'createTime'],
-  weight_records: ['weight_value', 'record_date', 'measure_time', 'note', 'createTime']
-}
-
 // 猫咪档案允许由前端修改的字段（_openid / shared_with / auto_feeder_config 不可经 saveCat 修改）
 const CAT_FIELDS = ['name', 'avatar', 'birthday', 'diagnosis_date', 'targetMin', 'targetMax', 'hypoAlertEnabled']
 
 const INVITE_TTL_MS = 7 * 24 * 3600 * 1000 // 邀请有效期 7 天
 const INVITE_REUSE_MIN_REMAINING_MS = 24 * 3600 * 1000 // 剩余有效期大于 1 天时复用旧邀请
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/
-
-const pick = (obj, keys) => {
-  const out = {}
-  if (!obj || typeof obj !== 'object') return out
-  keys.forEach(k => {
-    if (obj[k] !== undefined) out[k] = obj[k]
-  })
-  return out
-}
-
-const assertRecordType = (type) => {
-  if (!RECORD_COLLECTIONS.includes(type)) {
-    throw new Error('Invalid record type')
-  }
-}
 
 const clampInt = (val, min, max, fallback) => {
   const n = parseInt(val, 10)
@@ -491,6 +466,12 @@ exports.main = async (event, context) => {
           .skip(skip)
           .limit(limit)
           .get()
+
+        // 确保返回的记录按实际业务时间精确降序 (最新在前)，统一使用北京时间 (CST) 消除时区偏移与旧 createTime 残留乱序
+        if (Array.isArray(data) && data.length > 1) {
+          data.sort(compareRecordsDescendingCST)
+        }
+
         return { success: true, data }
       }
 
@@ -499,28 +480,7 @@ exports.main = async (event, context) => {
         assertRecordType(type)
         const raw = payload.recordData || {}
         await checkCatAccess(raw.cat_id)
-        const recordData = pick(raw, RECORD_FIELDS[type])
-        if (type === 'blood_glucose') {
-          const val = Number(recordData.bg_value)
-          if (isNaN(val) || val <= 0 || val > 100) throw new Error('Invalid bg_value')
-          recordData.bg_value = val
-        } else if (type === 'insulin_records') {
-          const val = Number(recordData.dose)
-          if (isNaN(val) || val <= 0 || val > 50) throw new Error('Invalid dose')
-          recordData.dose = val
-        } else if (type === 'meal_records') {
-          const val = Number(recordData.food_grams)
-          if (isNaN(val) || val < 0 || val > 2000) throw new Error('Invalid food_grams')
-          recordData.food_grams = val
-        } else if (type === 'weight_records') {
-          const val = Number(recordData.weight_value)
-          if (isNaN(val) || val <= 0 || val > 50) throw new Error('Invalid weight_value')
-          recordData.weight_value = val
-        }
-        if (recordData.note !== undefined) recordData.note = String(recordData.note).slice(0, 500)
-        if (typeof recordData.createTime !== 'number' || isNaN(recordData.createTime)) {
-          recordData.createTime = Date.now()
-        }
+        const recordData = validateAndNormalizeRecord(type, raw, { partial: false })
         recordData.cat_id = raw.cat_id
         recordData.created_by = openid
         const res = await db.collection(type).add({
@@ -535,30 +495,7 @@ exports.main = async (event, context) => {
         if (!recordId || typeof recordId !== 'string') throw new Error('Missing recordId')
         await checkCatAccess(catId)
         const raw = payload.recordData || {}
-        const recordData = pick(raw, RECORD_FIELDS[type])
-        if (type === 'blood_glucose' && recordData.bg_value !== undefined) {
-          const val = Number(recordData.bg_value)
-          if (isNaN(val) || val <= 0 || val > 100) throw new Error('Invalid bg_value')
-          recordData.bg_value = val
-        } else if (type === 'insulin_records' && recordData.dose !== undefined) {
-          const val = Number(recordData.dose)
-          if (isNaN(val) || val <= 0 || val > 50) throw new Error('Invalid dose')
-          recordData.dose = val
-        } else if (type === 'meal_records' && recordData.food_grams !== undefined) {
-          const val = Number(recordData.food_grams)
-          if (isNaN(val) || val < 0 || val > 2000) throw new Error('Invalid food_grams')
-          recordData.food_grams = val
-        } else if (type === 'weight_records' && recordData.weight_value !== undefined) {
-          const val = Number(recordData.weight_value)
-          if (isNaN(val) || val <= 0 || val > 50) throw new Error('Invalid weight_value')
-          recordData.weight_value = val
-        }
-        if (recordData.note !== undefined) recordData.note = String(recordData.note).slice(0, 500)
-        if (recordData.createTime !== undefined) {
-          const ts = Number(recordData.createTime)
-          if (!isNaN(ts) && ts > 0) recordData.createTime = ts
-          else delete recordData.createTime
-        }
+        const recordData = validateAndNormalizeRecord(type, raw, { partial: true })
         recordData.updateTime = Date.now()
         recordData.updated_by = openid
         const res = await db.collection(type).where({ _id: recordId, cat_id: catId }).update({

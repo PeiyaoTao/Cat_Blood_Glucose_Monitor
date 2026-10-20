@@ -32,10 +32,10 @@
         <view class="upload-icon-wrap">
           <view class="icon-svg icon-file-excel"></view>
         </view>
-        <text class="upload-main-text">选择 Excel 文件上传</text>
-        <text class="upload-sub-text">支持电脑本地文件、微信聊天记录或文件传输助手</text>
+        <text class="upload-main-text">选择 Excel / CSV 文件上传</text>
+        <text class="upload-sub-text">支持 .xlsx / .xls / .csv，可从微信聊天记录或文件传输助手选取</text>
         <button class="btn btn-primary btn-choose" :loading="isAnalyzing">
-          {{ isAnalyzing ? '正在智能解析中...' : '选择 Excel 文件' }}
+          {{ isAnalyzing ? '正在智能解析中...' : '选择 Excel / CSV 文件' }}
         </button>
       </view>
 
@@ -48,6 +48,50 @@
         <text class="faq-desc">
           如需导入金山文档/WPS/腾讯文档等在线表格，请先将表格下载至本地，再发送给微信【文件传输助手】，即可在此直接选取导入。
         </text>
+      </view>
+    </view>
+
+    <!-- 已导入批次管理面板 (退出导入界面核对数据后，随时回到此处手动选择回滚) -->
+    <view class="batch-history-card card" v-if="!parseResult && !importSuccessResult">
+      <view class="batch-header">
+        <view class="batch-header-left">
+          <text class="batch-title">已导入数据回滚管理</text>
+          <text class="batch-sub">在主页或历史页核对数据后若发现有误，可在此按批次撤回（不影响日常手动添加的记录）</text>
+        </view>
+      </view>
+
+      <view class="batch-empty" v-if="isLoadingBatches">
+        <text class="batch-empty-text">正在查询当前猫咪的已导入记录...</text>
+      </view>
+
+      <view class="batch-list" v-else-if="recentBatches.length > 0">
+        <view class="batch-item" v-for="batch in recentBatches" :key="batch.batchId">
+          <view class="batch-main">
+            <view class="batch-name-row">
+              <text class="batch-file-name">{{ batch.fileName || 'Excel / CSV 历史数据导入' }}</text>
+              <text class="batch-total-tag">共 {{ batch.totalCount }} 条</text>
+            </view>
+            <text class="batch-meta-text" v-if="batch.importedAt">
+              导入时间：{{ formatBatchTime(batch.importedAt) }}
+            </text>
+            <text class="batch-meta-text" v-if="batch.startDate">
+              记录区间：{{ batch.startDate }} 至 {{ batch.endDate || batch.startDate }}
+            </text>
+            <text class="batch-counts-text">{{ formatBatchCounts(batch.counts) }}</text>
+          </view>
+          <button
+            class="btn-rollback-item"
+            :loading="rollingBackBatchId === batch.batchId"
+            :disabled="Boolean(rollingBackBatchId)"
+            @click="handleRollbackBatch(batch)"
+          >
+            回滚此批次
+          </button>
+        </view>
+      </view>
+
+      <view class="batch-empty" v-else>
+        <text class="batch-empty-text">当前猫咪（{{ currentCatName }}）暂无通过表格导入的记录</text>
       </view>
     </view>
 
@@ -83,6 +127,10 @@
             <text class="stat-num text-excretion">{{ parseResult.summary.excretionCount }}</text>
             <text class="stat-label">排泄记录</text>
           </view>
+          <view class="stat-box" v-if="parseResult.summary.weightCount > 0">
+            <text class="stat-num text-insulin">{{ parseResult.summary.weightCount }}</text>
+            <text class="stat-label">体重记录</text>
+          </view>
         </view>
       </view>
 
@@ -117,7 +165,10 @@
           <switch :checked="skipDuplicates" color="#2ECC71" style="transform: scale(0.8);" />
           <view class="option-text">
             <text class="option-title">自动跳过重复记录 (推荐开启)</text>
-            <text class="option-sub">若数据库已有相同日期、时间与数值的记录则自动跳过，防止产生冗余</text>
+            <text class="option-sub" v-if="(parseResult.summary.duplicateCount || 0) > 0">
+              已预检发现 {{ parseResult.summary.duplicateCount }} 条数据库重复记录，开启后将自动跳过
+            </text>
+            <text class="option-sub" v-else>若数据库已有相同日期、时间与数值的记录则自动跳过，防止产生冗余</text>
           </view>
         </label>
       </view>
@@ -195,13 +246,19 @@
         </view>
       </view>
 
-      <!-- 成功后操作按钮 -->
+      <!-- 导入后回滚提示与操作按钮 -->
+      <view class="rollback-guide-banner">
+        <text class="rollback-guide-text">
+          💡 请先返回主页或历史页核对图表与记录；若后续发现导入的数据有误，随时重新进入「实用工具 → 导入数据」即可在页面下方按批次一键回滚。
+        </text>
+      </view>
+
       <view class="action-buttons">
         <button class="btn btn-primary submit-import-btn" @click="goToHome">
           返回主页查看血糖图表
         </button>
         <button class="btn btn-secondary re-choose-btn" @click="resetUpload">
-          继续导入其他表格
+          返回导入页（查看已导入批次 / 继续导入）
         </button>
       </view>
     </view>
@@ -209,20 +266,46 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { callCloudFunction, markDataDirty } from '@/utils/api'
+import { ref, computed, onMounted, watch } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
+import {
+  pickExcelFileFromWeChat,
+  uploadAndParseClinicalWorkbook,
+  commitClinicalWorkbookImport,
+  cancelStagedWorkbookImport,
+  fetchRecentImportBatches,
+  rollbackClinicalWorkbookImport,
+  PrivacyAgreementError,
+  type ImportParseResponse,
+  type ImportCommitResponse,
+  type ImportBatchItem
+} from '@/utils/dataTransfer'
 import { useCatSession } from '@/composables/useCatSession'
 
 const isAnalyzing = ref(false)
 const isImporting = ref(false)
+const isLoadingBatches = ref(false)
+const rollingBackBatchId = ref('')
 const selectedFileName = ref('')
 const uploadedFileID = ref('')
 const skipDuplicates = ref(true)
-const parseResult = ref<any>(null)
-const importSuccessResult = ref<any>(null)
+const parseResult = ref<ImportParseResponse | null>(null)
+const importSuccessResult = ref<ImportCommitResponse | null>(null)
+const recentBatches = ref<ImportBatchItem[]>([])
 
 const { currentCatId, currentCat, fetchCats } = useCatSession()
 const currentCatName = computed(() => currentCat.value?.name || '当前猫咪')
+
+const loadRecentBatches = async () => {
+  isLoadingBatches.value = true
+  try {
+    recentBatches.value = await fetchRecentImportBatches(currentCatId.value)
+  } catch (e) {
+    console.log('loadRecentBatches warning', e)
+  } finally {
+    isLoadingBatches.value = false
+  }
+}
 
 onMounted(async () => {
   try {
@@ -230,6 +313,17 @@ onMounted(async () => {
   } catch (e) {
     console.log('fetch cat in import page warning', e)
   }
+  await loadRecentBatches()
+})
+
+onShow(() => {
+  if (!parseResult.value && !importSuccessResult.value) {
+    loadRecentBatches()
+  }
+})
+
+watch(currentCatId, () => {
+  loadRecentBatches()
 })
 
 const totalRecordsToImport = computed(() => {
@@ -238,55 +332,23 @@ const totalRecordsToImport = computed(() => {
   return (s.glucoseCount || 0) + (s.insulinCount || 0) + (s.mealCount || 0) + (s.excretionCount || 0) + (s.weightCount || 0)
 })
 
-// 执行原生微信文件选择
-const executeChooseFile = () => {
-  wx.chooseMessageFile({
-    count: 1,
-    type: 'file',
-    extension: ['xlsx', 'xls'],
-    success: (res: any) => {
-      if (res.tempFiles && res.tempFiles.length > 0) {
-        const file = res.tempFiles[0]
-        selectedFileName.value = file.name
-        uploadAndParse(file.path)
-      }
-    },
-    fail: (err: any) => {
-      if (err && (err.errno === 112 || (err.errMsg && err.errMsg.includes('privacy agreement')))) {
-        uni.showModal({
-          title: '隐私指引配置提示',
-          content: '微信提示尚未在小程序后台声明“选文件”权限。如在开发者工具中调试，可在右上角【详情】->【本地设置】中勾选或处理隐私配置；发布前需在微信公众平台【用户隐私保护指引】中增加“选择会话文件”权限声明。',
-          showCancel: false
-        })
-        return
-      }
-      if (!err.errMsg || !err.errMsg.includes('cancel')) {
-        uni.showToast({ title: '选择文件失败', icon: 'none' })
-        console.error('chooseMessageFile failed', err)
-      }
-    }
-  })
-}
-
 // 从微信会话或本地选取文件
-const chooseExcelFile = () => {
-  if (typeof wx === 'undefined' || !wx.chooseMessageFile) {
-    uni.showToast({ title: '请在微信小程序客户端中使用', icon: 'none' })
-    return
-  }
-
-  // 兼容隐私授权协议流程
-  if (wx.requirePrivacyAuthorize) {
-    wx.requirePrivacyAuthorize({
-      success: () => {
-        executeChooseFile()
-      },
-      fail: () => {
-        executeChooseFile()
-      }
-    })
-  } else {
-    executeChooseFile()
+const chooseExcelFile = async () => {
+  try {
+    const file = await pickExcelFileFromWeChat()
+    if (!file) return
+    selectedFileName.value = file.name
+    await uploadAndParse(file.path)
+  } catch (err: any) {
+    if (err instanceof PrivacyAgreementError) {
+      uni.showModal({
+        title: '隐私指引配置提示',
+        content: err.message,
+        showCancel: false
+      })
+      return
+    }
+    uni.showToast({ title: err?.message || '选择文件失败', icon: 'none' })
   }
 }
 
@@ -296,39 +358,17 @@ const uploadAndParse = async (filePath: string) => {
   uni.showLoading({ title: '正在上传与智能解析...', mask: true })
 
   try {
-    const catId = currentCatId.value || uni.getStorageSync('currentCatId') || 'default'
-    const uploadRes = await wx.cloud.uploadFile({
-      cloudPath: `temp_imports/${Date.now()}_${Math.floor(Math.random() * 1000)}.xlsx`,
-      filePath: filePath
-    })
-
-    uploadedFileID.value = uploadRes.fileID
-
-    const parseData = await callCloudFunction('importExcel', {
-      action: 'parse',
-      fileID: uploadRes.fileID,
-      catId: catId
-    })
-
+    const parseData = await uploadAndParseClinicalWorkbook(filePath, currentCatId.value)
     uni.hideLoading()
-
-    if (parseData && parseData.code === 0) {
-      parseResult.value = parseData
-      uni.showToast({ title: '解析成功', icon: 'success' })
-    } else {
-      uni.showModal({
-        title: '解析提示',
-        content: parseData?.msg || '未能成功解析该 Excel 文件，请检查表头或内容格式',
-        showCancel: false
-      })
-      resetUpload()
-    }
+    uploadedFileID.value = parseData.fileID || ''
+    parseResult.value = parseData
+    uni.showToast({ title: '解析成功', icon: 'success' })
   } catch (err: any) {
     uni.hideLoading()
     console.error('Upload & Parse failed', err)
     uni.showModal({
-      title: '解析异常',
-      content: '调用解析服务失败，请确保云函数 importExcel 已上传并安装依赖。',
+      title: '解析提示',
+      content: err?.message || '调用解析服务失败，请确保云函数 importExcel 已上传并安装依赖。',
       showCancel: false
     })
     resetUpload()
@@ -339,39 +379,31 @@ const uploadAndParse = async (filePath: string) => {
 
 // 确认批量写入数据库
 const confirmImport = async () => {
-  if (!parseResult.value || !parseResult.value.parsedData) return
+  if (!parseResult.value) return
 
   isImporting.value = true
   uni.showLoading({ title: '正在批量导入入库...', mask: true })
 
   try {
-    const catId = currentCatId.value || uni.getStorageSync('currentCatId') || 'default'
-
-    const importData = await callCloudFunction('importExcel', {
-      action: 'import',
+    const importData = await commitClinicalWorkbookImport({
       fileID: uploadedFileID.value,
-      catId: catId,
+      fileName: selectedFileName.value,
+      catId: currentCatId.value,
       parsedData: parseResult.value.parsedData,
       skipDuplicates: skipDuplicates.value
     })
-
     uni.hideLoading()
-
-    if (importData && importData.code === 0) {
-      importSuccessResult.value = importData
-      markDataDirty()
-      uni.showToast({ title: '导入完成', icon: 'success' })
-    } else {
-      uni.showModal({
-        title: '导入提示',
-        content: importData?.msg || '未能成功导入数据，请稍后重试',
-        showCancel: false
-      })
-    }
+    importSuccessResult.value = importData
+    await loadRecentBatches()
+    uni.showToast({ title: '导入完成', icon: 'success' })
   } catch (err: any) {
     uni.hideLoading()
     console.error('Import confirmation failed', err)
-    uni.showToast({ title: '导入入库异常:' + err.message, icon: 'none' })
+    uni.showModal({
+      title: '导入提示',
+      content: err?.message || '未能成功导入数据，请稍后重试',
+      showCancel: false
+    })
   } finally {
     isImporting.value = false
   }
@@ -387,10 +419,73 @@ const goToHome = () => {
 }
 
 const resetUpload = () => {
+  if (uploadedFileID.value) {
+    cancelStagedWorkbookImport(uploadedFileID.value)
+  }
   parseResult.value = null
   importSuccessResult.value = null
   selectedFileName.value = ''
   uploadedFileID.value = ''
+  loadRecentBatches()
+}
+
+const formatBatchTime = (ts: number) => {
+  if (!ts) return '未知时间'
+  const d = new Date(ts)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+const formatBatchCounts = (counts: ImportBatchItem['counts']) => {
+  if (!counts) return ''
+  const parts: string[] = []
+  if (counts.glucose > 0) parts.push(`血糖 ${counts.glucose}`)
+  if (counts.insulin > 0) parts.push(`打针 ${counts.insulin}`)
+  if (counts.meal > 0) parts.push(`饮食 ${counts.meal}`)
+  if (counts.excretion > 0) parts.push(`排泄 ${counts.excretion}`)
+  if (counts.weight > 0) parts.push(`体重 ${counts.weight}`)
+  return parts.join(' · ')
+}
+
+const handleRollbackBatch = (batch: ImportBatchItem) => {
+  if (!batch || !batch.batchId) return
+  const label = batch.fileName ? `「${batch.fileName}」` : '该批次'
+  uni.showModal({
+    title: '确认回滚导入数据？',
+    content: `即将撤回并删除${label}导入的 ${batch.totalCount || ''} 条记录。日常手动添加的记录与其他导入批次不受任何影响。`,
+    confirmText: '确认回滚',
+    confirmColor: '#E53E3E',
+    cancelText: '取消',
+    success: async (res) => {
+      if (!res.confirm) return
+      rollingBackBatchId.value = batch.batchId
+      uni.showLoading({ title: '正在回滚数据...', mask: true })
+      try {
+        const result = await rollbackClinicalWorkbookImport(
+          batch,
+          currentCatId.value,
+          (done, total) => {
+            uni.showLoading({ title: `正在回滚 (${done}/${total})...`, mask: true })
+          }
+        )
+        uni.hideLoading()
+        await loadRecentBatches()
+        uni.showToast({
+          title: `已回滚 ${result.totalDeleted} 条记录`,
+          icon: 'success'
+        })
+      } catch (err: any) {
+        uni.hideLoading()
+        uni.showModal({
+          title: '回滚失败',
+          content: err?.message || '回滚过程中出现异常，请稍后重试',
+          showCancel: false
+        })
+      } finally {
+        rollingBackBatchId.value = ''
+      }
+    }
+  })
 }
 </script>
 
@@ -787,6 +882,132 @@ const resetUpload = () => {
   font-size: 28rpx;
   color: var(--text-sub);
   background: #E2E8F0;
+}
+.rollback-current-btn {
+  height: 88rpx;
+  line-height: 88rpx;
+  border-radius: 44rpx;
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #E53E3E;
+  background: #FFF5F5;
+  border: 2rpx solid #FEB2B2;
+}
+
+.rollback-guide-banner {
+  background: #F0FDF4;
+  border: 2rpx solid #BBF7D0;
+  border-radius: 16rpx;
+  padding: 20rpx 24rpx;
+  margin-top: 8rpx;
+}
+.rollback-guide-text {
+  font-size: 22rpx;
+  color: #166534;
+  line-height: 1.5;
+  display: block;
+}
+.batch-empty {
+  background: #F8FAFC;
+  border-radius: 16rpx;
+  padding: 28rpx 24rpx;
+  text-align: center;
+}
+.batch-empty-text {
+  font-size: 24rpx;
+  color: var(--text-sub);
+}
+
+/* 最近导入批次管理卡片 */
+.batch-history-card {
+  padding: 32rpx;
+}
+.batch-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 24rpx;
+}
+.batch-title {
+  font-size: 30rpx;
+  font-weight: 800;
+  color: var(--text-main);
+  display: block;
+  margin-bottom: 6rpx;
+}
+.batch-sub {
+  font-size: 22rpx;
+  color: var(--text-sub);
+  line-height: 1.4;
+  display: block;
+}
+.batch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+}
+.batch-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #F8FAFC;
+  border: 1rpx solid #E2E8F0;
+  border-radius: 16rpx;
+  padding: 24rpx;
+}
+.batch-main {
+  flex: 1;
+  margin-right: 20rpx;
+  overflow: hidden;
+}
+.batch-name-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8rpx;
+}
+.batch-file-name {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-right: 12rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.batch-total-tag {
+  font-size: 20rpx;
+  font-weight: 700;
+  color: #16A085;
+  background: #E8F8F5;
+  padding: 2rpx 12rpx;
+  border-radius: 100rpx;
+  flex-shrink: 0;
+}
+.batch-meta-text {
+  font-size: 22rpx;
+  color: var(--text-sub);
+  display: block;
+  margin-bottom: 4rpx;
+}
+.batch-counts-text {
+  font-size: 22rpx;
+  font-weight: 600;
+  color: #475569;
+  display: block;
+  margin-top: 6rpx;
+}
+.btn-rollback-item {
+  margin: 0;
+  padding: 0 24rpx;
+  height: 64rpx;
+  line-height: 64rpx;
+  border-radius: 32rpx;
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #E53E3E;
+  background: #FFF5F5;
+  border: 2rpx solid #FEB2B2;
+  flex-shrink: 0;
 }
 
 /* SVG 图标 */

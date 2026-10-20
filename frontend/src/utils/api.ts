@@ -125,18 +125,34 @@ export const getLocalCurrentTime = (): string => {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-// 安全地根据 年-月-日 和 时:分 构造本地时间戳（彻底避免 ISO 时区位移导致日期前移一天的 BUG）
+// 安全地根据 年-月-日 和 时:分(:秒) 构造本地时间戳（彻底避免 ISO 时区位移导致日期前移一天的 BUG，并支持秒级精度与同分防碰撞）
 export const makeLocalTimestamp = (dateStr: string, timeStr?: string): number => {
   if (!dateStr) return Date.now()
   const [y, m, d] = dateStr.split('-').map(Number)
   let hour = 0
   let min = 0
+  let sec = 0
+  let ms = 0
   if (timeStr) {
     const parts = timeStr.split(':').map(Number)
     hour = parts[0] || 0
     min = parts[1] || 0
+    if (parts.length >= 3 && !isNaN(parts[2])) {
+      sec = parts[2]
+    } else {
+      const now = new Date()
+      const isToday = now.getFullYear() === y && now.getMonth() === m - 1 && now.getDate() === d
+      const isCurrentMinute = isToday && now.getHours() === hour && now.getMinutes() === min
+      if (isCurrentMinute) {
+        sec = now.getSeconds()
+        ms = now.getMilliseconds()
+      } else {
+        // 过去/指定时间：保留毫秒级偏移量 (0~999ms)，防止同一分钟内连续录入时毫秒完全相同导致排序不稳定
+        ms = now.getMilliseconds()
+      }
+    }
   }
-  return new Date(y, m - 1, d, hour, min, 0).getTime()
+  return new Date(y, m - 1, d, hour, min, sec, ms).getTime()
 }
 
 // 计算从某个本地日期 (YYYY-MM-DD) 到今天经过的自然日天数（按本地零点计算，不受时区影响）

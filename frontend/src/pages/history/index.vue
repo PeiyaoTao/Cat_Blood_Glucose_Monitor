@@ -133,7 +133,7 @@ import { ref } from 'vue'
 import { onShow, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
 import { callApi, getDataVersion } from '@/utils/api'
 import { useCatSession } from '@/composables/useCatSession'
-import { evaluateGlucoseStatus } from '@/utils/glucoseDomain'
+import { evaluateGlucoseStatus, compareRecordsDescending } from '@/utils/glucoseDomain'
 
 const currentTab = ref(0) // 0: 血糖, 1: 打针, 2: 饮食, 3: 排泄, 4: 体重
 const filterDate = ref('')
@@ -148,6 +148,7 @@ const { currentCatId, currentTargetRange, fetchCats } = useCatSession()
 let hasInitialLoaded = false
 let lastLoadedCatId = ''
 let lastLoadedVersion = -1
+let requestSeq = 0
 
 const getCollectionName = () => {
   if (currentTab.value === 0) return 'blood_glucose'
@@ -231,7 +232,9 @@ const loadMore = () => {
 }
 
 const loadData = async (isReset: boolean) => {
-  if (isLoading.value) return
+  if (!isReset && isLoading.value) return
+  const seq = ++requestSeq
+  const targetTab = currentTab.value
   isLoading.value = true
 
   if (isReset) {
@@ -242,27 +245,35 @@ const loadData = async (isReset: boolean) => {
   try {
     const catId = currentCatId.value || uni.getStorageSync('currentCatId') || 'default'
     const collectionName = getCollectionName()
+    const skipCount = isReset ? 0 : records.value.length
     
     const res = await callApi('getRecords', {
       catId,
       type: collectionName,
       recordDate: filterDate.value || undefined,
       limit: PAGE_SIZE,
-      skip: records.value.length
+      skip: skipCount
     })
+
+    if (seq !== requestSeq) return
       
     if (res.data.length < PAGE_SIZE) {
       hasMore.value = false
     }
     
-    records.value = [...records.value, ...res.data]
+    const timeField = targetTab === 0 ? 'measure_time' : (targetTab === 1 ? 'inject_time' : (targetTab === 2 ? 'meal_time' : (targetTab === 3 ? 'record_time' : 'measure_time')))
+    const merged = isReset ? [...res.data] : [...records.value, ...res.data]
+    records.value = merged.sort((a, b) => compareRecordsDescending(a, b, timeField))
     lastLoadedCatId = catId
     lastLoadedVersion = getDataVersion()
   } catch (e) {
+    if (seq !== requestSeq) return
     console.error('获取记录失败', e)
     uni.showToast({ title: '加载失败', icon: 'none' })
   } finally {
-    isLoading.value = false
+    if (seq === requestSeq) {
+      isLoading.value = false
+    }
   }
 }
 

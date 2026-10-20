@@ -50,7 +50,7 @@
           <view class="icon-svg icon-import"></view>
         </view>
         <text class="tool-name">导入数据</text>
-        <text class="tool-desc">智能识别历史 Excel</text>
+        <text class="tool-desc">表格导入与回滚</text>
       </view>
     </view>
   </view>
@@ -60,8 +60,10 @@
 import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { getFeederConfig, fetchFeederConfigFromCloud, isFeederConfigValid, type AutoFeederConfig } from '@/utils/feederSync'
-import { callApi, callCloudFunction } from '@/utils/api'
+import { exportClinicalReport } from '@/utils/dataTransfer'
+import { useCatSession } from '@/composables/useCatSession'
 
+const { currentCatId } = useCatSession()
 const feederStatusDesc = ref('适配喂食机定时出餐')
 const isFeederRunning = ref(false)
 
@@ -79,7 +81,7 @@ const applyFeederStatus = (cfg: AutoFeederConfig) => {
 }
 
 const refreshFeederStatus = async () => {
-  const catId = uni.getStorageSync('currentCatId') || 'default'
+  const catId = currentCatId.value || uni.getStorageSync('currentCatId') || 'default'
   // 先用本地缓存快速展示，再以云端配置为准刷新（家人可能在其他设备上修改了托管设置）
   applyFeederStatus(getFeederConfig(catId))
   if (catId !== 'default') {
@@ -127,72 +129,23 @@ const handleToolClick = (toolName: string) => {
 }
 
 const exportExcel = async (days: number) => {
-  if (typeof wx === 'undefined' || !wx.cloud) return
-  
-  uni.showLoading({ title: '正在生成表格...', mask: true })
-  
   try {
-    const catId = uni.getStorageSync('currentCatId') || 'default'
-    const result = await callCloudFunction('exportExcel', { days, catId })
-    
-    if (result && result.code === 0 && result.fileID) {
-      uni.showLoading({ title: '正在下载文件...' })
-      wx.cloud.downloadFile({
-        fileID: result.fileID,
-        success: (downloadRes: any) => {
-          uni.hideLoading()
-          // 已下载到本地，清理云端临时报告文件，避免云存储无限增长
-          callApi('deleteReportFile', { fileID: result.fileID }).catch(() => {})
-          const customFileName = result.fileName || '血糖报告.xlsx'
-          const fs = wx.getFileSystemManager()
-          const targetPath = `${wx.env.USER_DATA_PATH}/${customFileName}`
-
-          fs.copyFile({
-            srcPath: downloadRes.tempFilePath,
-            destPath: targetPath,
-            success: () => {
-              wx.openDocument({
-                filePath: targetPath,
-                fileType: 'xlsx',
-                showMenu: true,
-                success: function () {
-                  console.log('打开文档成功:', customFileName)
-                },
-                fail: function (openErr: any) {
-                  console.error('打开重命名文件失败，回退打开临时文件', openErr)
-                  wx.openDocument({
-                    filePath: downloadRes.tempFilePath,
-                    fileType: 'xlsx',
-                    showMenu: true
-                  })
-                }
-              })
-            },
-            fail: (copyErr: any) => {
-              console.error('复制重命名文件失败，使用原路径打开', copyErr)
-              wx.openDocument({
-                filePath: downloadRes.tempFilePath,
-                fileType: 'xlsx',
-                showMenu: true
-              })
-            }
-          })
-        },
-        fail: (err: any) => {
-          uni.hideLoading()
-          uni.showToast({ title: '下载失败', icon: 'none' })
-          console.error(err)
-        }
-      })
-    } else {
-      uni.hideLoading()
-      uni.showToast({ title: result?.msg || '生成失败，请检查云函数部署', icon: 'none' })
-      console.error(result)
-    }
-  } catch (err) {
+    await exportClinicalReport(days, {
+      onStageChange: (stage) => {
+        uni.showLoading({
+          title: stage === 'generating' ? '正在生成表格...' : '正在下载文件...',
+          mask: true
+        })
+      }
+    })
     uni.hideLoading()
-    console.error('调用云函数失败', err)
-    uni.showToast({ title: '调用失败，请确保云函数 exportExcel 已部署', icon: 'none' })
+  } catch (err: any) {
+    uni.hideLoading()
+    console.error('导出报告失败:', err)
+    uni.showToast({
+      title: err?.message || '导出失败，请确保云函数 exportExcel 已部署',
+      icon: 'none'
+    })
   }
 }
 </script>

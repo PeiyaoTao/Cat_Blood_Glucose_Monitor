@@ -214,7 +214,9 @@ import {
   DEFAULT_TARGET_MAX,
   evaluateGlucoseStatus,
   normalizeTargetRange,
-  calculateCatAge
+  calculateCatAge,
+  compareRecordsChronological,
+  compareRecordsDescending
 } from '@/utils/glucoseDomain'
 import {
   computeWeightScale,
@@ -448,7 +450,7 @@ const currentChartItems = computed<Array<{
   statusText: string
 }>>(() => {
   if (currentChartTab.value === 'glucose') {
-    const chartItems = [...rawGlucoseData.value].reverse()
+    const chartItems = [...rawGlucoseData.value].sort((a, b) => compareRecordsChronological(a, b, 'measure_time'))
     return chartItems.map((item, idx) => {
       const dt = formatItemDate(item)
       const bg = typeof item.bg_value === 'number' ? Number(item.bg_value.toFixed(1)) : parseFloat(item.bg_value || '0')
@@ -467,7 +469,7 @@ const currentChartItems = computed<Array<{
       }
     })
   } else {
-    const chartItems = [...rawWeightData.value].reverse()
+    const chartItems = [...rawWeightData.value].sort((a, b) => compareRecordsChronological(a, b, 'measure_time'))
     return chartItems.map((item, idx) => {
       const dt = formatItemDate(item)
       const wt = typeof item.weight_value === 'number' ? Number(item.weight_value.toFixed(2)) : parseFloat(item.weight_value || '0')
@@ -730,7 +732,8 @@ const fetchRecentRecords = async () => {
   try {
     const res = await callApi('getRecords', { catId: catInfo.value._id, type: 'blood_glucose', limit: 30 })
     if (res.data) {
-      recentRecords.value = res.data.slice(0, 4).map((item: any) => {
+      const sortedDesc = [...res.data].sort((a, b) => compareRecordsDescending(a, b, 'measure_time'))
+      recentRecords.value = sortedDesc.slice(0, 4).map((item: any) => {
         let displayTime = ''
         const timeStr = item.measure_time || ''
         if (item.record_date && item.record_date.includes('-')) {
@@ -748,7 +751,7 @@ const fetchRecentRecords = async () => {
           value: item.bg_value
         }
       })
-      rawGlucoseData.value = res.data
+      rawGlucoseData.value = sortedDesc
       fullGlucoseData.value = null
       if (currentChartTab.value === 'glucose') renderChart()
     }
@@ -762,7 +765,8 @@ const fetchRecentWeights = async () => {
   try {
     const res = await callApi('getRecords', { catId: catInfo.value._id, type: 'weight_records', limit: 30 })
     if (res.data) {
-      rawWeightData.value = res.data
+      const sortedDesc = [...res.data].sort((a, b) => compareRecordsDescending(a, b, 'measure_time'))
+      rawWeightData.value = sortedDesc
       fullWeightData.value = null
       if (currentChartTab.value === 'weight') renderChart()
     }
